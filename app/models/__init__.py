@@ -22,6 +22,7 @@ from app.models.enums import (
 )
 from app.models.hub import Hub
 from app.models.material_batch import MaterialBatch
+from app.models.point_ledger import PointLedger
 from app.models.return_session import ReturnSession
 from app.models.user import User
 
@@ -34,6 +35,7 @@ __all__ = [
     "ReturnSession",
     "MaterialBatch",
     "BottleTransaction",
+    "PointLedger",
     "UserRole",
     "MaterialType",
     "HubStatus",
