@@ -20,6 +20,8 @@ from app.models.enums import (
     VoucherStatus,
 )
 from app.models.hub import Hub
+from app.models.material_batch import MaterialBatch
+from app.models.return_session import ReturnSession
 from app.models.user import User
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "User",
     "Hub",
+    "ReturnSession",
+    "MaterialBatch",
     "UserRole",
     "MaterialType",
     "HubStatus",
