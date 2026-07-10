@@ -36,7 +36,6 @@ class VerificationEvent(UUIDPrimaryKeyMixin, Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("bottle_transactions.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
     verification_level: Mapped[VerificationLevel] = mapped_column(

@@ -39,7 +39,6 @@ class PointLedger(UUIDPrimaryKeyMixin, Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
 
     source_type: Mapped[PointSourceType] = mapped_column(

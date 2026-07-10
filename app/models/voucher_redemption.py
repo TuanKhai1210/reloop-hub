@@ -38,14 +38,12 @@ class VoucherRedemption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
 
     voucher_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("vouchers.id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
 
     redemption_code: Mapped[str] = mapped_column(
