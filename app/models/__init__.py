@@ -25,6 +25,8 @@ from app.models.material_batch import MaterialBatch
 from app.models.point_ledger import PointLedger
 from app.models.return_session import ReturnSession
 from app.models.user import User
+from app.models.voucher import Voucher
+from app.models.voucher_redemption import VoucherRedemption
 
 __all__ = [
     "Base",
@@ -36,6 +38,8 @@ __all__ = [
     "MaterialBatch",
     "BottleTransaction",
     "PointLedger",
+    "Voucher",
+    "VoucherRedemption",
     "UserRole",
     "MaterialType",
     "HubStatus",
