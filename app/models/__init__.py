@@ -19,11 +19,15 @@ from app.models.enums import (
     VoucherRedemptionStatus,
     VoucherStatus,
 )
+from app.models.hub import Hub
+from app.models.user import User
 
 __all__ = [
     "Base",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
+    "User",
+    "Hub",
     "UserRole",
     "MaterialType",
     "HubStatus",
