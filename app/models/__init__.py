@@ -3,6 +3,7 @@
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
+from app.models.bottle_transaction import BottleTransaction
 from app.models.enums import (
     BottleTransactionStatus,
     CleanlinessStatus,
@@ -32,6 +33,7 @@ __all__ = [
     "Hub",
     "ReturnSession",
     "MaterialBatch",
+    "BottleTransaction",
     "UserRole",
     "MaterialType",
     "HubStatus",
