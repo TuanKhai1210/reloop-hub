@@ -21,6 +21,7 @@ from app.models.enums import (
     VoucherStatus,
 )
 from app.models.hub import Hub
+from app.models.pickup import Pickup
 from app.models.material_batch import MaterialBatch
 from app.models.point_ledger import PointLedger
 from app.models.return_session import ReturnSession
@@ -40,6 +41,7 @@ __all__ = [
     "PointLedger",
     "Voucher",
     "VoucherRedemption",
+    "Pickup",
     "UserRole",
     "MaterialType",
     "HubStatus",

@@ -42,6 +42,13 @@ class MaterialBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
 
+    pickup_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("pickups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     material_type: Mapped[MaterialType] = mapped_column(
         SqlEnum(
             MaterialType,
