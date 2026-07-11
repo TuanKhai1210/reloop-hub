@@ -1,22 +1,37 @@
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models import (
+    BottleTransaction,
+    BottleTransactionStatus,
+    CleanlinessStatus,
     HubStatus,
+    MaterialBatchStatus,
+    MaterialType,
+    PointLedger,
+    PointSourceType,
     ReturnSession,
     ReturnSessionStatus,
+    VerificationEvent,
+    VerificationResult,
 )
 from app.repositories import (
+    BottleTransactionRepository,
     HubRepository,
+    MaterialBatchRepository,
+    PointLedgerRepository,
     ReturnSessionRepository,
     UserRepository,
+    VerificationEventRepository,
 )
 from app.services.errors import (
     ConflictError,
     EntityNotFoundError,
     InvalidStateError,
 )
+from app.services.return_commands import AcceptBottleCommand
 
 
 class ReturnService:
@@ -27,12 +42,39 @@ class ReturnService:
         }
     )
 
+    SUPPORTED_MATERIAL_TYPES = frozenset(
+        {
+            MaterialType.PET,
+            MaterialType.HDPE,
+        }
+    )
+
+    GRAMS_PER_KILOGRAM = Decimal("1000")
+
     def __init__(self, session: Session) -> None:
         self.session = session
+
         self.user_repository = UserRepository(session)
         self.hub_repository = HubRepository(session)
+
         self.return_session_repository = (
             ReturnSessionRepository(session)
+        )
+
+        self.bottle_transaction_repository = (
+            BottleTransactionRepository(session)
+        )
+
+        self.material_batch_repository = (
+            MaterialBatchRepository(session)
+        )
+
+        self.verification_event_repository = (
+            VerificationEventRepository(session)
+        )
+
+        self.point_ledger_repository = (
+            PointLedgerRepository(session)
         )
 
     def start_session(
@@ -59,7 +101,9 @@ class ReturnService:
         user_id: UUID,
         hub_id: UUID,
     ) -> ReturnSession:
-        user = self.user_repository.get_by_id_for_update(user_id)
+        user = self.user_repository.get_by_id_for_update(
+            user_id
+        )
 
         if user is None:
             raise EntityNotFoundError("user not found")
@@ -95,3 +139,246 @@ class ReturnService:
                 finished_at=None,
             )
         )
+
+    def accept_bottle(
+        self,
+        command: AcceptBottleCommand,
+    ) -> BottleTransaction:
+        if self.session.in_transaction():
+            return self._accept_bottle(command)
+
+        with self.session.begin():
+            return self._accept_bottle(command)
+
+    def _accept_bottle(
+        self,
+        command: AcceptBottleCommand,
+    ) -> BottleTransaction:
+        return_session = (
+            self.return_session_repository
+            .get_by_id_for_update(command.session_id)
+        )
+
+        if return_session is None:
+            raise EntityNotFoundError(
+                "return session not found"
+            )
+
+        if return_session.status != ReturnSessionStatus.OPEN:
+            raise InvalidStateError(
+                "return session is not open"
+            )
+
+        existing_transaction = (
+            self.bottle_transaction_repository
+            .get_by_code(command.transaction_code)
+        )
+
+        if existing_transaction is not None:
+            raise ConflictError(
+                "transaction code already exists"
+            )
+
+        user = self.user_repository.get_by_id_for_update(
+            return_session.user_id
+        )
+
+        if user is None:
+            raise EntityNotFoundError("user not found")
+
+        hub = self.hub_repository.get_by_id_for_update(
+            return_session.hub_id
+        )
+
+        if hub is None:
+            raise EntityNotFoundError("hub not found")
+
+        if hub.status not in self.AVAILABLE_HUB_STATUSES:
+            raise InvalidStateError(
+                "hub is not available for bottle returns"
+            )
+
+        batch = (
+            self.material_batch_repository
+            .get_by_id_for_update(command.batch_id)
+        )
+
+        if batch is None:
+            raise EntityNotFoundError(
+                "material batch not found"
+            )
+
+        if batch.hub_id != return_session.hub_id:
+            raise InvalidStateError(
+                "material batch belongs to another hub"
+            )
+
+        if batch.status != MaterialBatchStatus.STORING:
+            raise InvalidStateError(
+                "material batch is not storing bottles"
+            )
+
+        if (
+            command.material_type
+            not in self.SUPPORTED_MATERIAL_TYPES
+        ):
+            raise InvalidStateError(
+                "unsupported material type"
+            )
+
+        if (
+            command.verified_material_type
+            != command.material_type
+        ):
+            raise InvalidStateError(
+                "verified material type does not match"
+            )
+
+        if batch.material_type != command.material_type:
+            raise InvalidStateError(
+                "material batch type does not match"
+            )
+
+        if (
+            command.cleanliness_status
+            != CleanlinessStatus.CLEAN
+        ):
+            raise InvalidStateError(
+                "accepted bottle must be clean"
+            )
+
+        if command.weight_gram <= 0:
+            raise InvalidStateError(
+                "accepted bottle weight must be positive"
+            )
+
+        if command.points_awarded < 0:
+            raise InvalidStateError(
+                "awarded points must be non-negative"
+            )
+
+        if not command.transaction_code.strip():
+            raise InvalidStateError(
+                "transaction code must not be empty"
+            )
+
+        if not command.verifier_name.strip():
+            raise InvalidStateError(
+                "verifier name must not be empty"
+            )
+
+        if command.material_type == MaterialType.PET:
+            if hub.pet_current >= hub.pet_capacity:
+                raise InvalidStateError(
+                    "hub PET compartment is full"
+                )
+
+            hub.pet_current += 1
+
+        elif command.material_type == MaterialType.HDPE:
+            if hub.hdpe_current >= hub.hdpe_capacity:
+                raise InvalidStateError(
+                    "hub HDPE compartment is full"
+                )
+
+            hub.hdpe_current += 1
+
+        weight_kg = (
+            command.weight_gram
+            / self.GRAMS_PER_KILOGRAM
+        )
+
+        batch.bottle_count += 1
+        batch.estimated_weight_kg += weight_kg
+
+        return_session.total_accepted += 1
+        return_session.total_points += (
+            command.points_awarded
+        )
+
+        new_balance = (
+            user.points_balance
+            + command.points_awarded
+        )
+
+        user.points_balance = new_balance
+        user.total_bottles_returned += 1
+
+        bottle_transaction = (
+            self.bottle_transaction_repository.add(
+                BottleTransaction(
+                    code=command.transaction_code,
+                    session_id=return_session.id,
+                    batch_id=batch.id,
+                    material_type=command.material_type,
+                    verified_material_type=(
+                        command.verified_material_type
+                    ),
+                    status=(
+                        BottleTransactionStatus.ACCEPTED
+                    ),
+                    reject_reason=None,
+                    verification_level=(
+                        command.verification_level
+                    ),
+                    cleanliness_status=(
+                        command.cleanliness_status
+                    ),
+                    weight_gram=command.weight_gram,
+                    ai_confidence=command.confidence,
+                    points_awarded=(
+                        command.points_awarded
+                    ),
+                )
+            )
+        )
+
+        self.verification_event_repository.add(
+            VerificationEvent(
+                transaction_id=bottle_transaction.id,
+                verification_level=(
+                    command.verification_level
+                ),
+                result=VerificationResult.PASS,
+                verifier_name=command.verifier_name,
+                verifier_version=(
+                    command.verifier_version
+                ),
+                rule_code=command.rule_code,
+                input_payload=dict(
+                    command.input_payload
+                ),
+                output_payload=(
+                    dict(command.output_payload)
+                    if command.output_payload is not None
+                    else None
+                ),
+                confidence=command.confidence,
+                processing_time_ms=(
+                    command.processing_time_ms
+                ),
+                failure_reason=None,
+            )
+        )
+
+        if command.points_awarded > 0:
+            self.point_ledger_repository.add(
+                PointLedger(
+                    user_id=user.id,
+                    source_type=(
+                        PointSourceType.BOTTLE_RETURN
+                    ),
+                    source_id=bottle_transaction.id,
+                    points_change=(
+                        command.points_awarded
+                    ),
+                    balance_after=new_balance,
+                    description=(
+                        "Accepted bottle return"
+                    ),
+                )
+            )
+
+        self.session.flush()
+
+        return bottle_transaction
