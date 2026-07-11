@@ -1,10 +1,10 @@
-﻿from datetime import datetime
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint
 from sqlalchemy import DateTime
 from sqlalchemy import Enum as SqlEnum
-from sqlalchemy import ForeignKey, Integer
+from sqlalchemy import ForeignKey, Index, Integer, text
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,12 @@ class ReturnSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "total_points >= 0",
             name="ck_return_sessions_total_points_non_negative",
+        ),
+        Index(
+            "uq_return_sessions_user_open",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'OPEN'"),
         ),
     )
 
