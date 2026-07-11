@@ -1,4 +1,5 @@
-﻿from app.services.errors import (
+from app.services.return_commands import AcceptBottleCommand
+from app.services.errors import (
     ConflictError,
     EntityNotFoundError,
     InvalidStateError,
@@ -7,6 +8,7 @@
 from app.services.return_service import ReturnService
 
 __all__ = [
+    "AcceptBottleCommand",
     "ConflictError",
     "EntityNotFoundError",
     "InvalidStateError",
