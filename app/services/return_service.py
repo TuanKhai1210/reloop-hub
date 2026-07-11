@@ -1,4 +1,4 @@
-﻿from uuid import UUID
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -59,7 +59,7 @@ class ReturnService:
         user_id: UUID,
         hub_id: UUID,
     ) -> ReturnSession:
-        user = self.user_repository.get_by_id(user_id)
+        user = self.user_repository.get_by_id_for_update(user_id)
 
         if user is None:
             raise EntityNotFoundError("user not found")

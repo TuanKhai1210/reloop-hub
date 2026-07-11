@@ -1,4 +1,5 @@
-﻿from uuid import uuid4
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -189,3 +190,27 @@ def test_start_session_rejects_unknown_hub(
             user_id=user.id,
             hub_id=uuid4(),
         )
+
+
+def test_start_session_locks_user_row(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    service = ReturnService(db_session)
+
+    with patch.object(
+        service.user_repository,
+        "get_by_id_for_update",
+        wraps=(
+            service.user_repository
+            .get_by_id_for_update
+        ),
+    ) as locked_get:
+        return_session = service.start_session(
+            user_id=user.id,
+            hub_id=hub.id,
+        )
+
+    locked_get.assert_called_once_with(user.id)
+    assert return_session.user_id == user.id
