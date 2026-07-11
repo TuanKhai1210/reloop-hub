@@ -36,27 +36,68 @@ Copy-Item .env.example .env
 Update `.env`:
 
 ```env
-DATABASE\_URL=postgresql+psycopg://reloop\_app:YOUR\_PASSWORD@localhost:5432/reloop\_hub
-APP\_ENV=development
-APP\_NAME=ReLoop Hub API
+DATABASE_URL=postgresql+psycopg://reloop_app:YOUR_PASSWORD@localhost:5432/reloop_hub
+APP_ENV=development
+APP_NAME=ReLoop Hub API
 DEBUG=true
 ```
 
 Do not commit `.env`.
+
+## Configure the isolated test database
+
+Database integration tests must never use the development database.
+
+Create the local test environment file:
+
+```powershell
+Copy-Item .env.test.example .env.test
+```
+
+Update the password in `.env.test` and keep these values:
+
+```env
+APP_ENV=test
+DEBUG=false
+TEST_DATABASE_URL=postgresql+psycopg://reloop_app:YOUR_PASSWORD@localhost:5432/reloop_hub_test
+```
+
+Create the PostgreSQL test database with `reloop_app` as its owner:
+
+```powershell
+& "C:\Program Files\PostgreSQL\18\bin\createdb.exe" `
+    -h 127.0.0.1 `
+    -p 5432 `
+    -U postgres `
+    -W `
+    -O reloop_app `
+    reloop_hub_test
+```
+
+Apply Alembic migrations to `reloop_hub_test` before running tests.
+
+The test suite exits without running tests when:
+
+- `APP_ENV` is not `test`
+- `TEST_DATABASE_URL` is missing
+- the configured database name does not end with `_test`
+- the connected database does not match `TEST_DATABASE_URL`
+
+Do not commit `.env.test`.
 
 ## Create the PostgreSQL user and database
 
 Run through pgAdmin or PostgreSQL:
 
 ```sql
-CREATE USER reloop\_app WITH PASSWORD 'YOUR\_PASSWORD';
-CREATE DATABASE reloop\_hub OWNER reloop\_app;
+CREATE USER reloop_app WITH PASSWORD 'YOUR_PASSWORD';
+CREATE DATABASE reloop_hub OWNER reloop_app;
 ```
 
 ## Test the database connection
 
 ```powershell
-python -m scripts.check\_database
+python -m scripts.check_database
 ```
 
 Expected output:
@@ -98,7 +139,7 @@ No new upgrade operations detected.
 ## Seed demo data
 
 ```powershell
-python -m scripts.seed\_database
+python -m scripts.seed_database
 ```
 
 First run:
@@ -129,16 +170,16 @@ The seed script creates:
 
 - `users`
 - `hubs`
-- `return\_sessions`
-- `material\_batches`
-- `bottle\_transactions`
-- `point\_ledger`
+- `return_sessions`
+- `material_batches`
+- `bottle_transactions`
+- `point_ledger`
 - `vouchers`
-- `voucher\_redemptions`
+- `voucher_redemptions`
 - `pickups`
-- `verification\_events`
+- `verification_events`
 
-Alembic also creates the `alembic\_version` table.
+Alembic also creates the `alembic_version` table.
 
 ## Database ownership
 

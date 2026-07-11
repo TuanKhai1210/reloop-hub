@@ -1,12 +1,12 @@
-﻿import pytest
+import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
 
 import app.models
-from app.core.database import engine
 from app.models.base import Base
 
 
@@ -33,8 +33,9 @@ def get_expected_foreign_keys(
 
 def get_actual_foreign_keys(
     table_name: str,
+    database_engine: Engine,
 ) -> set[tuple[str, str, str]]:
-    database_inspector = inspect(engine)
+    database_inspector = inspect(database_engine)
     foreign_keys = database_inspector.get_foreign_keys(
         table_name,
         schema="public",
@@ -61,8 +62,10 @@ def get_actual_foreign_keys(
     return result
 
 
-def test_database_tables_match_model_metadata() -> None:
-    database_inspector = inspect(engine)
+def test_database_tables_match_model_metadata(
+    database_engine: Engine,
+) -> None:
+    database_inspector = inspect(database_engine)
 
     actual_tables = set(
         database_inspector.get_table_names(
@@ -88,8 +91,9 @@ def test_database_tables_match_model_metadata() -> None:
 )
 def test_database_columns_match_model_metadata(
     table_name: str,
+    database_engine: Engine,
 ) -> None:
-    database_inspector = inspect(engine)
+    database_inspector = inspect(database_engine)
     model_table = Base.metadata.tables[table_name]
 
     expected_columns = {
@@ -114,8 +118,9 @@ def test_database_columns_match_model_metadata(
 )
 def test_database_primary_key_matches_model_metadata(
     table_name: str,
+    database_engine: Engine,
 ) -> None:
-    database_inspector = inspect(engine)
+    database_inspector = inspect(database_engine)
     model_table = Base.metadata.tables[table_name]
 
     expected_primary_key = {
@@ -143,18 +148,22 @@ def test_database_primary_key_matches_model_metadata(
 )
 def test_database_foreign_keys_match_model_metadata(
     table_name: str,
+    database_engine: Engine,
 ) -> None:
     expected_foreign_keys = get_expected_foreign_keys(
         table_name
     )
     actual_foreign_keys = get_actual_foreign_keys(
-        table_name
+        table_name,
+        database_engine,
     )
 
     assert actual_foreign_keys == expected_foreign_keys
 
 
-def test_database_revision_matches_alembic_head() -> None:
+def test_database_revision_matches_alembic_head(
+    database_engine: Engine,
+) -> None:
     alembic_config = Config("alembic.ini")
     script_directory = ScriptDirectory.from_config(
         alembic_config
@@ -162,7 +171,7 @@ def test_database_revision_matches_alembic_head() -> None:
 
     migration_heads = set(script_directory.get_heads())
 
-    with engine.connect() as connection:
+    with database_engine.connect() as connection:
         database_heads = set(
             connection.execute(
                 text(
@@ -176,8 +185,10 @@ def test_database_revision_matches_alembic_head() -> None:
     assert database_heads == migration_heads
 
 
-def test_database_has_no_schema_drift() -> None:
-    with engine.connect() as connection:
+def test_database_has_no_schema_drift(
+    database_engine: Engine,
+) -> None:
+    with database_engine.connect() as connection:
         migration_context = MigrationContext.configure(
             connection
         )
