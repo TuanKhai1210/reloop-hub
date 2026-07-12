@@ -76,6 +76,8 @@ def create_hub(db_session: Session) -> Hub:
 def create_batch(
     db_session: Session,
     hub: Hub,
+    *,
+    material_type: MaterialType = MaterialType.PET,
 ) -> MaterialBatch:
     token = uuid4().hex[:12].upper()
 
@@ -84,7 +86,7 @@ def create_batch(
             code=f"ACCEPT-BATCH-{token}",
             hub_id=hub.id,
             pickup_id=None,
-            material_type=MaterialType.PET,
+            material_type=material_type,
             bottle_count=0,
             estimated_weight_kg=Decimal("0"),
             status=MaterialBatchStatus.STORING,
@@ -402,6 +404,245 @@ def test_accept_bottle_rejects_invalid_batch_without_changes(
     assert stored_session_hub is not None
     assert stored_session_hub.pet_current == 0
     assert stored_session_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert stored_batch.estimated_weight_kg == Decimal("0.000")
+
+    assert stored_transactions == []
+
+
+@pytest.mark.parametrize(
+    "command_overrides,expected_message",
+    [
+        (
+            {
+                "material_type": MaterialType.UNKNOWN,
+                "verified_material_type": MaterialType.UNKNOWN,
+            },
+            "unsupported material type",
+        ),
+        (
+            {
+                "verified_material_type": MaterialType.HDPE,
+            },
+            "verified material type does not match",
+        ),
+        (
+            {
+                "material_type": MaterialType.HDPE,
+                "verified_material_type": MaterialType.HDPE,
+            },
+            "material batch type does not match",
+        ),
+        (
+            {
+                "cleanliness_status": CleanlinessStatus.DIRTY,
+            },
+            "accepted bottle must be clean",
+        ),
+        (
+            {
+                "weight_gram": Decimal("0"),
+            },
+            "accepted bottle weight must be positive",
+        ),
+        (
+            {
+                "weight_gram": Decimal("-1.00"),
+            },
+            "accepted bottle weight must be positive",
+        ),
+    ],
+)
+def test_accept_bottle_rejects_invalid_bottle_without_changes(
+    db_session: Session,
+    command_overrides: dict[str, object],
+    expected_message: str,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    batch = create_batch(db_session, hub)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    command_data = {
+        "session_id": return_session.id,
+        "batch_id": batch.id,
+        "transaction_code": (
+            f"INVALID-BOTTLE-TX-{uuid4().hex.upper()}"
+        ),
+        "material_type": MaterialType.PET,
+        "verified_material_type": MaterialType.PET,
+        "verification_level": VerificationLevel.LEVEL_2,
+        "cleanliness_status": CleanlinessStatus.CLEAN,
+        "weight_gram": Decimal("25.00"),
+        "points_awarded": 10,
+        "verifier_name": "sensor_rule_engine",
+    }
+
+    command_data.update(command_overrides)
+
+    command = AcceptBottleCommand(**command_data)
+
+    with pytest.raises(
+        InvalidStateError,
+        match=expected_message,
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert stored_batch.estimated_weight_kg == Decimal("0.000")
+
+    assert stored_transactions == []
+
+
+@pytest.mark.parametrize(
+    "material_type,expected_message",
+    [
+        (
+            MaterialType.PET,
+            "hub PET compartment is full",
+        ),
+        (
+            MaterialType.HDPE,
+            "hub HDPE compartment is full",
+        ),
+    ],
+)
+def test_accept_bottle_rejects_full_compartment_without_changes(
+    db_session: Session,
+    material_type: MaterialType,
+    expected_message: str,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+
+    batch = create_batch(
+        db_session,
+        hub,
+        material_type=material_type,
+    )
+
+    if material_type == MaterialType.PET:
+        hub.pet_current = hub.pet_capacity
+    else:
+        hub.hdpe_current = hub.hdpe_capacity
+
+    db_session.flush()
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=batch.id,
+        transaction_code=(
+            f"FULL-HUB-TX-{uuid4().hex.upper()}"
+        ),
+        material_type=material_type,
+        verified_material_type=material_type,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        InvalidStateError,
+        match=expected_message,
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+
+    if material_type == MaterialType.PET:
+        assert stored_hub.pet_current == stored_hub.pet_capacity
+        assert stored_hub.hdpe_current == 0
+    else:
+        assert stored_hub.pet_current == 0
+        assert stored_hub.hdpe_current == stored_hub.hdpe_capacity
 
     assert stored_session is not None
     assert stored_session.status == ReturnSessionStatus.OPEN
