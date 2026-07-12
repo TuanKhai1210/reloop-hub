@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -147,6 +148,50 @@ class ReturnService:
                 finished_at=None,
             )
         )
+
+    def complete_session(
+        self,
+        *,
+        session_id: UUID,
+    ) -> ReturnSession:
+        if self.session.in_transaction():
+            return self._complete_session(
+                session_id=session_id
+            )
+
+        with self.session.begin():
+            return self._complete_session(
+                session_id=session_id
+            )
+
+    def _complete_session(
+        self,
+        *,
+        session_id: UUID,
+    ) -> ReturnSession:
+        return_session = (
+            self.return_session_repository
+            .get_by_id_for_update(session_id)
+        )
+
+        if return_session is None:
+            raise EntityNotFoundError(
+                "return session not found"
+            )
+
+        if return_session.status != ReturnSessionStatus.OPEN:
+            raise InvalidStateError(
+                "return session is not open"
+            )
+
+        return_session.status = (
+            ReturnSessionStatus.COMPLETED
+        )
+        return_session.finished_at = datetime.now(UTC)
+
+        self.session.flush()
+
+        return return_session
 
     def accept_bottle(
         self,
