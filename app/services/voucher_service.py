@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -28,6 +29,10 @@ from app.services.voucher_commands import (
 class VoucherService:
     REDEMPTION_VALIDITY = timedelta(days=1)
 
+    REDEMPTION_CODE_UNIQUE_CONSTRAINT = (
+        "uq_voucher_redemptions_redemption_code"
+    )
+
     def __init__(self, session: Session) -> None:
         self.session = session
 
@@ -47,10 +52,62 @@ class VoucherService:
         command: RedeemVoucherCommand,
     ) -> VoucherRedemption:
         if self.session.in_transaction():
-            return self._redeem_voucher(command)
+            return (
+                self._redeem_voucher_with_conflict_mapping(
+                    command
+                )
+            )
 
         with self.session.begin():
-            return self._redeem_voucher(command)
+            return (
+                self._redeem_voucher_with_conflict_mapping(
+                    command
+                )
+            )
+
+    def _redeem_voucher_with_conflict_mapping(
+        self,
+        command: RedeemVoucherCommand,
+    ) -> VoucherRedemption:
+        try:
+            with self.session.begin_nested():
+                return self._redeem_voucher(command)
+        except IntegrityError as error:
+            if self._is_redemption_code_conflict(error):
+                raise ConflictError(
+                    "redemption code already exists"
+                ) from error
+
+            raise
+
+    @classmethod
+    def _is_redemption_code_conflict(
+        cls,
+        error: IntegrityError,
+    ) -> bool:
+        diagnostic = getattr(
+            error.orig,
+            "diag",
+            None,
+        )
+
+        constraint_name = getattr(
+            diagnostic,
+            "constraint_name",
+            None,
+        )
+
+        sqlstate = getattr(
+            error.orig,
+            "sqlstate",
+            None,
+        )
+
+        return (
+            sqlstate == "23505"
+            and constraint_name
+            == cls.REDEMPTION_CODE_UNIQUE_CONSTRAINT
+        )
 
     def _redeem_voucher(
         self,
