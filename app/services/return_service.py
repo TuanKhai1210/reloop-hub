@@ -1,6 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -50,6 +51,10 @@ class ReturnService:
     )
 
     GRAMS_PER_KILOGRAM = Decimal("1000")
+
+    TRANSACTION_CODE_UNIQUE_CONSTRAINT = (
+        "uq_bottle_transactions_code"
+    )
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -145,10 +150,62 @@ class ReturnService:
         command: AcceptBottleCommand,
     ) -> BottleTransaction:
         if self.session.in_transaction():
-            return self._accept_bottle(command)
+            return (
+                self._accept_bottle_with_conflict_mapping(
+                    command
+                )
+            )
 
         with self.session.begin():
-            return self._accept_bottle(command)
+            return (
+                self._accept_bottle_with_conflict_mapping(
+                    command
+                )
+            )
+
+    def _accept_bottle_with_conflict_mapping(
+        self,
+        command: AcceptBottleCommand,
+    ) -> BottleTransaction:
+        try:
+            with self.session.begin_nested():
+                return self._accept_bottle(command)
+        except IntegrityError as error:
+            if self._is_transaction_code_conflict(error):
+                raise ConflictError(
+                    "transaction code already exists"
+                ) from error
+
+            raise
+
+    @classmethod
+    def _is_transaction_code_conflict(
+        cls,
+        error: IntegrityError,
+    ) -> bool:
+        diagnostic = getattr(
+            error.orig,
+            "diag",
+            None,
+        )
+
+        constraint_name = getattr(
+            diagnostic,
+            "constraint_name",
+            None,
+        )
+
+        sqlstate = getattr(
+            error.orig,
+            "sqlstate",
+            None,
+        )
+
+        return (
+            sqlstate == "23505"
+            and constraint_name
+            == cls.TRANSACTION_CODE_UNIQUE_CONSTRAINT
+        )
 
     def _accept_bottle(
         self,
