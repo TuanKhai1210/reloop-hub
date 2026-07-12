@@ -27,6 +27,8 @@ from app.repositories import (
     VerificationEventRepository,
 )
 from app.services import (
+    ConflictError,
+    InvalidStateError,
     RejectBottleCommand,
     ReturnService,
 )
@@ -197,3 +199,306 @@ def test_reject_bottle_records_rejection_without_rewards(
     }
 
     assert stored_ledger is None
+
+
+@pytest.mark.parametrize(
+    "closed_status",
+    [
+        ReturnSessionStatus.COMPLETED,
+        ReturnSessionStatus.CANCELLED,
+    ],
+)
+def test_reject_bottle_rejects_closed_session_without_changes(
+    db_session: Session,
+    closed_status: ReturnSessionStatus,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    return_session.status = closed_status
+    db_session.flush()
+
+    command = RejectBottleCommand(
+        session_id=return_session.id,
+        transaction_code=(
+            f"CLOSED-REJECT-TX-{uuid4().hex.upper()}"
+        ),
+        material_type=MaterialType.UNKNOWN,
+        reject_reason=RejectReason.UNSUPPORTED_MATERIAL,
+        verification_level=VerificationLevel.LEVEL_2,
+        verifier_name="sensor_rule_engine",
+        verified_material_type=MaterialType.UNKNOWN,
+        cleanliness_status=CleanlinessStatus.UNKNOWN,
+    )
+
+    with pytest.raises(
+        InvalidStateError,
+        match="return session is not open",
+    ):
+        ReturnService(db_session).reject_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == closed_status
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_transactions == []
+
+
+@pytest.mark.parametrize(
+    "command_overrides,expected_message",
+    [
+        (
+            {
+                "transaction_code": "   ",
+            },
+            "transaction code must not be empty",
+        ),
+        (
+            {
+                "verifier_name": "   ",
+            },
+            "verifier name must not be empty",
+        ),
+        (
+            {
+                "weight_gram": Decimal("-1.00"),
+            },
+            "rejected bottle weight must be non-negative",
+        ),
+    ],
+)
+def test_reject_bottle_rejects_invalid_metadata_without_changes(
+    db_session: Session,
+    command_overrides: dict[str, object],
+    expected_message: str,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    command_data = {
+        "session_id": return_session.id,
+        "transaction_code": (
+            f"INVALID-REJECT-TX-{uuid4().hex.upper()}"
+        ),
+        "material_type": MaterialType.UNKNOWN,
+        "reject_reason": RejectReason.UNSUPPORTED_MATERIAL,
+        "verification_level": VerificationLevel.LEVEL_2,
+        "verifier_name": "sensor_rule_engine",
+        "verified_material_type": MaterialType.UNKNOWN,
+        "cleanliness_status": CleanlinessStatus.UNKNOWN,
+        "weight_gram": None,
+    }
+
+    command_data.update(command_overrides)
+
+    command = RejectBottleCommand(**command_data)
+
+    with pytest.raises(
+        InvalidStateError,
+        match=expected_message,
+    ):
+        ReturnService(db_session).reject_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_transactions == []
+
+
+def test_reject_bottle_rejects_duplicate_transaction_code(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    transaction_code = (
+        f"DUPLICATE-REJECT-TX-{uuid4().hex.upper()}"
+    )
+
+    first_command = RejectBottleCommand(
+        session_id=return_session.id,
+        transaction_code=transaction_code,
+        material_type=MaterialType.UNKNOWN,
+        reject_reason=RejectReason.UNSUPPORTED_MATERIAL,
+        verification_level=VerificationLevel.LEVEL_2,
+        verifier_name="sensor_rule_engine",
+        verified_material_type=MaterialType.UNKNOWN,
+        cleanliness_status=CleanlinessStatus.UNKNOWN,
+        failure_reason="unsupported material",
+    )
+
+    service = ReturnService(db_session)
+
+    first_transaction = service.reject_bottle(
+        first_command
+    )
+
+    duplicate_command = RejectBottleCommand(
+        session_id=return_session.id,
+        transaction_code=transaction_code,
+        material_type=MaterialType.PET,
+        reject_reason=RejectReason.DIRTY_BOTTLE,
+        verification_level=VerificationLevel.LEVEL_3,
+        verifier_name="duplicate_verifier",
+        verified_material_type=MaterialType.PET,
+        cleanliness_status=CleanlinessStatus.DIRTY,
+        weight_gram=Decimal("30.00"),
+        failure_reason="duplicate request",
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="transaction code already exists",
+    ):
+        service.reject_bottle(duplicate_command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    stored_verification = VerificationEventRepository(
+        db_session
+    ).get_latest_by_transaction(
+        first_transaction.id
+    )
+
+    stored_ledger = PointLedgerRepository(
+        db_session
+    ).get_by_source(
+        PointSourceType.BOTTLE_RETURN,
+        first_transaction.id,
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 1
+    assert stored_session.total_points == 0
+
+    assert len(stored_transactions) == 1
+    assert stored_transactions[0].id == first_transaction.id
+    assert (
+        stored_transactions[0].status
+        == BottleTransactionStatus.REJECTED
+    )
+    assert (
+        stored_transactions[0].reject_reason
+        == RejectReason.UNSUPPORTED_MATERIAL
+    )
+    assert stored_transactions[0].points_awarded == 0
+
+    assert stored_verification is not None
+    assert (
+        stored_verification.result
+        == VerificationResult.FAIL
+    )
+    assert (
+        stored_verification.failure_reason
+        == "unsupported material"
+    )
+
+    assert stored_ledger is None
+
