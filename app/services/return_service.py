@@ -32,7 +32,10 @@ from app.services.errors import (
     EntityNotFoundError,
     InvalidStateError,
 )
-from app.services.return_commands import AcceptBottleCommand
+from app.services.return_commands import (
+    AcceptBottleCommand,
+    RejectBottleCommand,
+)
 
 
 class ReturnService:
@@ -170,6 +173,39 @@ class ReturnService:
         try:
             with self.session.begin_nested():
                 return self._accept_bottle(command)
+        except IntegrityError as error:
+            if self._is_transaction_code_conflict(error):
+                raise ConflictError(
+                    "transaction code already exists"
+                ) from error
+
+            raise
+
+    def reject_bottle(
+        self,
+        command: RejectBottleCommand,
+    ) -> BottleTransaction:
+        if self.session.in_transaction():
+            return (
+                self._reject_bottle_with_conflict_mapping(
+                    command
+                )
+            )
+
+        with self.session.begin():
+            return (
+                self._reject_bottle_with_conflict_mapping(
+                    command
+                )
+            )
+
+    def _reject_bottle_with_conflict_mapping(
+        self,
+        command: RejectBottleCommand,
+    ) -> BottleTransaction:
+        try:
+            with self.session.begin_nested():
+                return self._reject_bottle(command)
         except IntegrityError as error:
             if self._is_transaction_code_conflict(error):
                 raise ConflictError(
@@ -435,6 +471,120 @@ class ReturnService:
                     ),
                 )
             )
+
+        self.session.flush()
+
+        return bottle_transaction
+
+    def _reject_bottle(
+        self,
+        command: RejectBottleCommand,
+    ) -> BottleTransaction:
+        return_session = (
+            self.return_session_repository
+            .get_by_id_for_update(command.session_id)
+        )
+
+        if return_session is None:
+            raise EntityNotFoundError(
+                "return session not found"
+            )
+
+        if return_session.status != ReturnSessionStatus.OPEN:
+            raise InvalidStateError(
+                "return session is not open"
+            )
+
+        existing_transaction = (
+            self.bottle_transaction_repository
+            .get_by_code(command.transaction_code)
+        )
+
+        if existing_transaction is not None:
+            raise ConflictError(
+                "transaction code already exists"
+            )
+
+        if not command.transaction_code.strip():
+            raise InvalidStateError(
+                "transaction code must not be empty"
+            )
+
+        if not command.verifier_name.strip():
+            raise InvalidStateError(
+                "verifier name must not be empty"
+            )
+
+        if (
+            command.weight_gram is not None
+            and command.weight_gram < 0
+        ):
+            raise InvalidStateError(
+                "rejected bottle weight must be non-negative"
+            )
+
+        return_session.total_rejected += 1
+
+        bottle_transaction = (
+            self.bottle_transaction_repository.add(
+                BottleTransaction(
+                    code=command.transaction_code,
+                    session_id=return_session.id,
+                    batch_id=None,
+                    material_type=command.material_type,
+                    verified_material_type=(
+                        command.verified_material_type
+                    ),
+                    status=(
+                        BottleTransactionStatus.REJECTED
+                    ),
+                    reject_reason=command.reject_reason,
+                    verification_level=(
+                        command.verification_level
+                    ),
+                    cleanliness_status=(
+                        command.cleanliness_status
+                    ),
+                    weight_gram=command.weight_gram,
+                    ai_confidence=command.confidence,
+                    points_awarded=0,
+                )
+            )
+        )
+
+        failure_reason = (
+            command.failure_reason
+            if command.failure_reason is not None
+            else command.reject_reason.value
+        )
+
+        self.verification_event_repository.add(
+            VerificationEvent(
+                transaction_id=bottle_transaction.id,
+                verification_level=(
+                    command.verification_level
+                ),
+                result=VerificationResult.FAIL,
+                verifier_name=command.verifier_name,
+                verifier_version=(
+                    command.verifier_version
+                ),
+                rule_code=command.rule_code,
+                input_payload=dict(
+                    command.input_payload
+                ),
+                output_payload=(
+                    dict(command.output_payload)
+                    if command.output_payload is not None
+                    else None
+                ),
+                confidence=command.confidence,
+                processing_time_ms=(
+                    command.processing_time_ms
+                ),
+                failure_reason=failure_reason,
+            )
+        )
 
         self.session.flush()
 
