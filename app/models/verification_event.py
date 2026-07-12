@@ -2,7 +2,18 @@
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -34,7 +45,7 @@ class VerificationEvent(UUIDPrimaryKeyMixin, Base):
 
     transaction_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("bottle_transactions.id", ondelete="CASCADE"),
+        ForeignKey("bottle_transactions.id", ondelete="RESTRICT"),
         nullable=False,
     )
 

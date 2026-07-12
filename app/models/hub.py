@@ -1,6 +1,8 @@
 ﻿from decimal import Decimal
 
-from sqlalchemy import CheckConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, CheckConstraint, DateTime
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy import Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -32,6 +34,18 @@ class Hub(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint(
             "pickup_threshold_percent BETWEEN 1 AND 100",
             name="ck_hubs_pickup_threshold_valid",
+        ),
+        CheckConstraint(
+            "capacity_kg > 0",
+            name="ck_hubs_capacity_kg_positive",
+        ),
+        CheckConstraint(
+            "current_load_kg >= 0 AND current_load_kg <= capacity_kg",
+            name="ck_hubs_current_load_valid",
+        ),
+        CheckConstraint(
+            "fill_level >= 0 AND fill_level <= 100",
+            name="ck_hubs_fill_level_valid",
         ),
     )
 
@@ -106,4 +120,44 @@ class Hub(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=80,
         server_default="80",
+    )
+
+    capacity_kg: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("200"),
+        server_default="200",
+    )
+
+    current_load_kg: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
+
+    fill_level: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default="0",
+    )
+
+    camera_online: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    sensor_online: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )

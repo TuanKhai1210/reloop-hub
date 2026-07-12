@@ -16,6 +16,14 @@ class HubRepository(BaseRepository[Hub]):
 
         return self.session.scalars(statement).one_or_none()
 
+    def get_by_code_for_update(self, code: str) -> Hub | None:
+        statement = (
+            select(Hub)
+            .where(Hub.code == code)
+            .with_for_update()
+        )
+        return self.session.scalars(statement).one_or_none()
+
     def list_by_status(
         self,
         status: HubStatus,

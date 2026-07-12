@@ -34,6 +34,13 @@ class BottleTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "(ai_confidence >= 0 AND ai_confidence <= 1)",
             name="ck_bottle_transactions_ai_confidence_valid",
         ),
+        CheckConstraint(
+            "(status = 'ACCEPTED' AND batch_id IS NOT NULL "
+            "AND reject_reason IS NULL) OR "
+            "(status = 'REJECTED' AND batch_id IS NULL "
+            "AND reject_reason IS NOT NULL AND points_awarded = 0)",
+            name="ck_bottle_transactions_outcome_consistent",
+        ),
     )
 
     code: Mapped[str] = mapped_column(

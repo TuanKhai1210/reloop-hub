@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 
@@ -77,9 +78,18 @@ def database_engine() -> Generator[Engine, None, None]:
     )
 
     try:
-        with test_engine.connect() as connection:
-            actual_database = connection.scalar(
-                text("SELECT current_database()")
+        try:
+            with test_engine.connect() as connection:
+                actual_database = connection.scalar(
+                    text("SELECT current_database()")
+                )
+        except OperationalError:
+            pytest.exit(
+                "Cannot connect to the isolated PostgreSQL test "
+                "database. Verify that PostgreSQL is running and "
+                "that TEST_DATABASE_URL is valid. Connection "
+                "credentials were intentionally omitted.",
+                returncode=2,
             )
 
         if actual_database != configured_database:

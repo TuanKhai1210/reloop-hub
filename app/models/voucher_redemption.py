@@ -22,6 +22,11 @@ class VoucherRedemption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "expires_at IS NULL OR expires_at > created_at",
             name="ck_voucher_redemptions_expiration_valid",
         ),
+        CheckConstraint(
+            "(status = 'USED' AND used_at IS NOT NULL) OR "
+            "(status <> 'USED' AND used_at IS NULL)",
+            name="ck_voucher_redemptions_usage_consistent",
+        ),
         Index(
             "ix_voucher_redemptions_user_created_at",
             "user_id",

@@ -18,7 +18,7 @@ MODEL_TABLE_NAMES = sorted(Base.metadata.tables)
 
 def get_expected_foreign_keys(
     table_name: str,
-) -> set[tuple[str, str, str]]:
+) -> set[tuple[str, str, str, str | None]]:
     table = Base.metadata.tables[table_name]
 
     return {
@@ -26,6 +26,7 @@ def get_expected_foreign_keys(
             foreign_key.parent.name,
             foreign_key.column.table.name,
             foreign_key.column.name,
+            foreign_key.ondelete,
         )
         for foreign_key in table.foreign_keys
     }
@@ -34,17 +35,20 @@ def get_expected_foreign_keys(
 def get_actual_foreign_keys(
     table_name: str,
     database_engine: Engine,
-) -> set[tuple[str, str, str]]:
+) -> set[tuple[str, str, str, str | None]]:
     database_inspector = inspect(database_engine)
     foreign_keys = database_inspector.get_foreign_keys(
         table_name,
         schema="public",
     )
 
-    result: set[tuple[str, str, str]] = set()
+    result: set[tuple[str, str, str, str | None]] = set()
 
     for foreign_key in foreign_keys:
         referred_table = foreign_key["referred_table"]
+        ondelete = foreign_key.get("options", {}).get(
+            "ondelete"
+        )
 
         for local_column, referred_column in zip(
             foreign_key["constrained_columns"],
@@ -56,6 +60,7 @@ def get_actual_foreign_keys(
                     local_column,
                     referred_table,
                     referred_column,
+                    ondelete,
                 )
             )
 
@@ -159,6 +164,33 @@ def test_database_foreign_keys_match_model_metadata(
     )
 
     assert actual_foreign_keys == expected_foreign_keys
+
+
+@pytest.mark.parametrize(
+    "table_name",
+    MODEL_TABLE_NAMES,
+)
+def test_database_check_constraints_match_model_metadata(
+    table_name: str,
+    database_engine: Engine,
+) -> None:
+    database_inspector = inspect(database_engine)
+    model_table = Base.metadata.tables[table_name]
+
+    expected_names = {
+        constraint.name
+        for constraint in model_table.constraints
+        if constraint.__class__.__name__ == "CheckConstraint"
+    }
+    actual_names = {
+        constraint["name"]
+        for constraint in database_inspector.get_check_constraints(
+            table_name,
+            schema="public",
+        )
+    }
+
+    assert actual_names == expected_names
 
 
 def test_database_revision_matches_alembic_head(

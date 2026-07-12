@@ -1,5 +1,5 @@
 ﻿from sqlalchemy import Enum as SqlEnum
-from sqlalchemy import Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -9,9 +9,39 @@ from app.models.enums import UserRole
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
+    __table_args__ = (
+        CheckConstraint(
+            "points_balance >= 0",
+            name="ck_users_points_balance_non_negative",
+        ),
+        CheckConstraint(
+            "total_bottles_returned >= 0",
+            name="ck_users_bottles_returned_non_negative",
+        ),
+    )
+
     name: Mapped[str] = mapped_column(
         String(120),
         nullable=False,
+    )
+
+    email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
+    hashed_password: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
     )
 
     phone: Mapped[str | None] = mapped_column(

@@ -33,6 +33,16 @@ class Pickup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "OR completed_at >= started_at",
             name="ck_pickups_completion_time_valid",
         ),
+        CheckConstraint(
+            "(status = 'PLANNED' AND started_at IS NULL "
+            "AND completed_at IS NULL) OR "
+            "(status = 'IN_PROGRESS' AND started_at IS NOT NULL "
+            "AND completed_at IS NULL) OR "
+            "(status = 'COMPLETED' AND started_at IS NOT NULL "
+            "AND completed_at IS NOT NULL) OR "
+            "(status = 'CANCELLED' AND completed_at IS NULL)",
+            name="ck_pickups_status_time_consistent",
+        ),
     )
 
     code: Mapped[str] = mapped_column(
@@ -50,7 +60,7 @@ class Pickup(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     driver_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

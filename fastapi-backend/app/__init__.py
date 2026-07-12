@@ -1,2 +1,0 @@
-"""ReLoop Hub backend."""
-

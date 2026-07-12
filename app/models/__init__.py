@@ -14,6 +14,8 @@ from app.models.enums import (
     PointSourceType,
     RejectReason,
     ReturnSessionStatus,
+    RouteStatus,
+    TraceStage,
     UserRole,
     VerificationLevel,
     VerificationResult,
@@ -29,6 +31,10 @@ from app.models.user import User
 from app.models.verification_event import VerificationEvent
 from app.models.voucher import Voucher
 from app.models.voucher_redemption import VoucherRedemption
+from app.models.sensor_reading import SensorReading
+from app.models.vehicle import Vehicle
+from app.models.collection_route import CollectionRoute, RouteStop
+from app.models.trace_event import TraceEvent
 
 __all__ = [
     "Base",
@@ -44,6 +50,11 @@ __all__ = [
     "VoucherRedemption",
     "Pickup",
     "VerificationEvent",
+    "SensorReading",
+    "Vehicle",
+    "CollectionRoute",
+    "RouteStop",
+    "TraceEvent",
     "UserRole",
     "MaterialType",
     "HubStatus",
@@ -58,4 +69,6 @@ __all__ = [
     "MaterialBatchStatus",
     "PickupStatus",
     "VerificationResult",
+    "RouteStatus",
+    "TraceStage",
 ]

@@ -9,7 +9,9 @@ from app.models import (
     BottleTransaction,
     BottleTransactionStatus,
     CleanlinessStatus,
+    Hub,
     HubStatus,
+    MaterialBatch,
     MaterialBatchStatus,
     MaterialType,
     PointLedger,
@@ -37,6 +39,10 @@ from app.services.return_commands import (
     AcceptBottleCommand,
     RejectBottleCommand,
 )
+from app.services.reward_policy import (
+    FixedBottleRewardPolicy,
+    RewardPolicy,
+)
 
 
 class ReturnService:
@@ -60,8 +66,16 @@ class ReturnService:
         "uq_bottle_transactions_code"
     )
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        reward_policy: RewardPolicy | None = None,
+    ) -> None:
         self.session = session
+        self.reward_policy = (
+            reward_policy or FixedBottleRewardPolicy()
+        )
 
         self.user_repository = UserRepository(session)
         self.hub_repository = HubRepository(session)
@@ -351,9 +365,12 @@ class ReturnService:
                 "return session is not open"
             )
 
+        transaction_code = command.transaction_code.strip()
+        verifier_name = command.verifier_name.strip()
+
         existing_transaction = (
             self.bottle_transaction_repository
-            .get_by_code(command.transaction_code)
+            .get_by_code(transaction_code)
         )
 
         if existing_transaction is not None:
@@ -378,6 +395,22 @@ class ReturnService:
         if hub.status not in self.AVAILABLE_HUB_STATUSES:
             raise InvalidStateError(
                 "hub is not available for bottle returns"
+            )
+
+        if (
+            command.material_type == MaterialType.PET
+            and hub.pet_current >= hub.pet_capacity
+        ):
+            raise InvalidStateError(
+                "hub PET compartment is full"
+            )
+
+        if (
+            command.material_type == MaterialType.HDPE
+            and hub.hdpe_current >= hub.hdpe_capacity
+        ):
+            raise InvalidStateError(
+                "hub HDPE compartment is full"
             )
 
         batch = (
@@ -439,12 +472,12 @@ class ReturnService:
                 "awarded points must be non-negative"
             )
 
-        if not command.transaction_code.strip():
+        if not transaction_code:
             raise InvalidStateError(
                 "transaction code must not be empty"
             )
 
-        if not command.verifier_name.strip():
+        if not verifier_name:
             raise InvalidStateError(
                 "verifier name must not be empty"
             )
@@ -465,6 +498,16 @@ class ReturnService:
 
             hub.hdpe_current += 1
 
+        points_awarded = self.reward_policy.points_for_bottle(
+            material_type=command.material_type,
+            verification_level=command.verification_level,
+        )
+
+        if points_awarded < 0:
+            raise InvalidStateError(
+                "reward policy returned negative points"
+            )
+
         weight_kg = (
             command.weight_gram
             / self.GRAMS_PER_KILOGRAM
@@ -473,14 +516,20 @@ class ReturnService:
         batch.bottle_count += 1
         batch.estimated_weight_kg += weight_kg
 
+        self._update_collection_state(
+            hub=hub,
+            batch=batch,
+            material_type=command.material_type,
+        )
+
         return_session.total_accepted += 1
         return_session.total_points += (
-            command.points_awarded
+            points_awarded
         )
 
         new_balance = (
             user.points_balance
-            + command.points_awarded
+            + points_awarded
         )
 
         user.points_balance = new_balance
@@ -489,7 +538,7 @@ class ReturnService:
         bottle_transaction = (
             self.bottle_transaction_repository.add(
                 BottleTransaction(
-                    code=command.transaction_code,
+                    code=transaction_code,
                     session_id=return_session.id,
                     batch_id=batch.id,
                     material_type=command.material_type,
@@ -509,7 +558,7 @@ class ReturnService:
                     weight_gram=command.weight_gram,
                     ai_confidence=command.confidence,
                     points_awarded=(
-                        command.points_awarded
+                        points_awarded
                     ),
                 )
             )
@@ -522,7 +571,7 @@ class ReturnService:
                     command.verification_level
                 ),
                 result=VerificationResult.PASS,
-                verifier_name=command.verifier_name,
+                verifier_name=verifier_name,
                 verifier_version=(
                     command.verifier_version
                 ),
@@ -543,7 +592,7 @@ class ReturnService:
             )
         )
 
-        if command.points_awarded > 0:
+        if points_awarded > 0:
             self.point_ledger_repository.add(
                 PointLedger(
                     user_id=user.id,
@@ -552,7 +601,7 @@ class ReturnService:
                     ),
                     source_id=bottle_transaction.id,
                     points_change=(
-                        command.points_awarded
+                        points_awarded
                     ),
                     balance_after=new_balance,
                     description=(
@@ -584,9 +633,12 @@ class ReturnService:
                 "return session is not open"
             )
 
+        transaction_code = command.transaction_code.strip()
+        verifier_name = command.verifier_name.strip()
+
         existing_transaction = (
             self.bottle_transaction_repository
-            .get_by_code(command.transaction_code)
+            .get_by_code(transaction_code)
         )
 
         if existing_transaction is not None:
@@ -594,12 +646,12 @@ class ReturnService:
                 "transaction code already exists"
             )
 
-        if not command.transaction_code.strip():
+        if not transaction_code:
             raise InvalidStateError(
                 "transaction code must not be empty"
             )
 
-        if not command.verifier_name.strip():
+        if not verifier_name:
             raise InvalidStateError(
                 "verifier name must not be empty"
             )
@@ -617,7 +669,7 @@ class ReturnService:
         bottle_transaction = (
             self.bottle_transaction_repository.add(
                 BottleTransaction(
-                    code=command.transaction_code,
+                    code=transaction_code,
                     session_id=return_session.id,
                     batch_id=None,
                     material_type=command.material_type,
@@ -654,7 +706,7 @@ class ReturnService:
                     command.verification_level
                 ),
                 result=VerificationResult.FAIL,
-                verifier_name=command.verifier_name,
+                verifier_name=verifier_name,
                 verifier_version=(
                     command.verifier_version
                 ),
@@ -678,3 +730,43 @@ class ReturnService:
         self.session.flush()
 
         return bottle_transaction
+
+    @staticmethod
+    def _update_collection_state(
+        *,
+        hub: Hub,
+        batch: MaterialBatch,
+        material_type: MaterialType,
+    ) -> None:
+        if material_type == MaterialType.PET:
+            current = hub.pet_current
+            capacity = hub.pet_capacity
+        else:
+            current = hub.hdpe_current
+            capacity = hub.hdpe_capacity
+
+        threshold_reached = (
+            current * 100
+            >= capacity * hub.pickup_threshold_percent
+        )
+
+        if threshold_reached:
+            batch.status = MaterialBatchStatus.READY_FOR_PICKUP
+
+        both_full = (
+            hub.pet_current >= hub.pet_capacity
+            and hub.hdpe_current >= hub.hdpe_capacity
+        )
+        any_threshold_reached = (
+            hub.pet_current * 100
+            >= hub.pet_capacity * hub.pickup_threshold_percent
+            or hub.hdpe_current * 100
+            >= hub.hdpe_capacity * hub.pickup_threshold_percent
+        )
+
+        if both_full:
+            hub.status = HubStatus.FULL
+        elif any_threshold_reached:
+            hub.status = HubStatus.NEAR_FULL
+        else:
+            hub.status = HubStatus.ACTIVE
