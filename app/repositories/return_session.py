@@ -103,3 +103,6 @@ class ReturnSessionRepository(BaseRepository[ReturnSession]):
 
         if limit <= 0:
             raise ValueError("limit must be positive")
+
+        if limit > BaseRepository.MAX_PAGE_SIZE:
+            raise ValueError("limit must not exceed 1000")

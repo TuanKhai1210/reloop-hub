@@ -85,6 +85,19 @@ class MaterialBatchRepository(BaseRepository[MaterialBatch]):
 
         return self.session.scalars(statement).all()
 
+    def list_by_pickup_for_update(
+        self,
+        pickup_id: UUID,
+    ) -> Sequence[MaterialBatch]:
+        statement = (
+            select(MaterialBatch)
+            .where(MaterialBatch.pickup_id == pickup_id)
+            .order_by(MaterialBatch.id)
+            .with_for_update()
+        )
+
+        return self.session.scalars(statement).all()
+
     def list_ready_for_pickup(
         self,
         *,
@@ -126,3 +139,6 @@ class MaterialBatchRepository(BaseRepository[MaterialBatch]):
 
         if limit <= 0:
             raise ValueError("limit must be positive")
+
+        if limit > BaseRepository.MAX_PAGE_SIZE:
+            raise ValueError("limit must not exceed 1000")

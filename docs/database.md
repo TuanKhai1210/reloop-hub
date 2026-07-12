@@ -261,3 +261,40 @@ fix(db): correct foreign key constraint
 chore(db): update seed data
 docs(db): add database setup guide
 ```
+
+## Transaction ownership
+
+HTTP request dependencies own the outer transaction. `get_db()` commits
+after a successful request and rolls back when an exception escapes. A
+service may also be called directly by a worker; in that case the service
+opens its own transaction when the Session has no active transaction.
+
+Repositories must never call `commit()` or `rollback()`. They may call
+`flush()` when IDs or constraint validation are required inside the current
+transaction.
+
+Do not catch a service exception and return a successful response from the
+same request transaction. Either let the exception escape or explicitly
+roll back before continuing.
+
+## Trusted command boundary
+
+Public API and device payloads do not control awarded Green Points. The
+return service calculates points through a server-owned `RewardPolicy`.
+Material verification fields must come from an authenticated Hub/verifier
+or a trusted internal adapter, not directly from the citizen client.
+
+Identifiers such as bottle transaction, pickup, and voucher redemption
+codes are normalized before lookup and persistence. API idempotency keys
+should be stored separately when HTTP endpoints are added.
+
+## Collection state transitions
+
+Accepted bottles update Hub inventory and the active material batch. When a
+material compartment reaches `pickup_threshold_percent`, its batch becomes
+`READY_FOR_PICKUP` and the Hub becomes `NEAR_FULL`. The Hub becomes `FULL`
+only when both supported compartments are full.
+
+Completing a pickup changes assigned batches to `PICKED_UP`, subtracts their
+bottle counts from Hub inventory, and recalculates Hub status. These changes
+must remain in one transaction.

@@ -27,6 +27,13 @@ class MaterialBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "material_type IN ('PET', 'HDPE')",
             name="ck_material_batches_supported_material",
         ),
+        CheckConstraint(
+            "(status = 'STORING' AND pickup_id IS NULL) OR "
+            "status = 'READY_FOR_PICKUP' OR "
+            "(status IN ('PICKED_UP', 'RECEIVED') "
+            "AND pickup_id IS NOT NULL)",
+            name="ck_material_batches_pickup_consistent",
+        ),
     )
 
     code: Mapped[str] = mapped_column(
@@ -44,7 +51,7 @@ class MaterialBatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     pickup_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("pickups.id", ondelete="SET NULL"),
+        ForeignKey("pickups.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

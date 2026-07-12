@@ -28,6 +28,12 @@ class ReturnSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "total_points >= 0",
             name="ck_return_sessions_total_points_non_negative",
         ),
+        CheckConstraint(
+            "(status = 'OPEN' AND finished_at IS NULL) OR "
+            "(status IN ('COMPLETED', 'CANCELLED') "
+            "AND finished_at IS NOT NULL)",
+            name="ck_return_sessions_status_time_consistent",
+        ),
         Index(
             "uq_return_sessions_user_open",
             "user_id",

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -224,6 +225,7 @@ def test_reject_bottle_rejects_closed_session_without_changes(
     )
 
     return_session.status = closed_status
+    return_session.finished_at = datetime.now(UTC)
     db_session.flush()
 
     command = RejectBottleCommand(
@@ -533,4 +535,3 @@ def test_reject_bottle_rejects_unknown_session_without_changes(
     ).get_by_code(transaction_code)
 
     assert stored_transaction is None
-

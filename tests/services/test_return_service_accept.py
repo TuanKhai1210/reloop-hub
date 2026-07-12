@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -225,6 +226,63 @@ def test_accept_bottle_updates_all_return_records(
     assert stored_ledger.balance_after == 10
 
 
+def test_accept_bottle_uses_server_reward_and_normalizes_metadata(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    hub.pet_capacity = 1
+    hub.pickup_threshold_percent = 100
+    batch = create_batch(db_session, hub)
+
+    return_session = ReturnService(db_session).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+    raw_code = f"  NORMALIZED-{uuid4().hex.upper()}  "
+
+    created = ReturnService(db_session).accept_bottle(
+        AcceptBottleCommand(
+            session_id=return_session.id,
+            batch_id=batch.id,
+            transaction_code=raw_code,
+            material_type=MaterialType.PET,
+            verified_material_type=MaterialType.PET,
+            verification_level=VerificationLevel.LEVEL_2,
+            cleanliness_status=CleanlinessStatus.CLEAN,
+            weight_gram=Decimal("25.00"),
+            points_awarded=999,
+            verifier_name="  sensor_rule_engine  ",
+        )
+    )
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(db_session).get_by_id(user.id)
+    stored_hub = HubRepository(db_session).get_by_id(hub.id)
+    stored_batch = MaterialBatchRepository(db_session).get_by_id(
+        batch.id
+    )
+    stored_transaction = BottleTransactionRepository(
+        db_session
+    ).get_by_id(created.id)
+    stored_verification = VerificationEventRepository(
+        db_session
+    ).get_latest_by_transaction(created.id)
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 10
+    assert stored_hub is not None
+    assert stored_hub.status == HubStatus.NEAR_FULL
+    assert stored_batch is not None
+    assert stored_batch.status == MaterialBatchStatus.READY_FOR_PICKUP
+    assert stored_transaction is not None
+    assert stored_transaction.code == raw_code.strip()
+    assert stored_transaction.points_awarded == 10
+    assert stored_verification is not None
+    assert stored_verification.verifier_name == "sensor_rule_engine"
+
+
 @pytest.mark.parametrize(
     "closed_status",
     [
@@ -248,6 +306,7 @@ def test_accept_bottle_rejects_closed_session_without_changes(
     )
 
     return_session.status = closed_status
+    return_session.finished_at = datetime.now(UTC)
     db_session.flush()
 
     command = AcceptBottleCommand(

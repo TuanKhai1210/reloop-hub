@@ -23,6 +23,11 @@ from app.repositories import (
     PickupRepository,
     UserRepository,
 )
+from app.services import (
+    AssignBatchCommand,
+    CreatePickupCommand,
+    PickupService,
+)
 
 
 pytestmark = pytest.mark.integration
@@ -687,3 +692,58 @@ def test_partial_pickup_failure_rolls_back_all_changes(
     assert stored_batch.status == (
         MaterialBatchStatus.READY_FOR_PICKUP
     )
+
+
+def test_pickup_service_completes_flow_and_releases_hub_capacity(
+    db_session: Session,
+) -> None:
+    driver = create_test_driver(db_session)
+    hub = create_test_hub(db_session)
+    hub.pet_current = 20
+    hub.status = HubStatus.NEAR_FULL
+    batch = create_test_batch(
+        db_session,
+        hub=hub,
+        material_type=MaterialType.PET,
+        bottle_count=20,
+        estimated_weight_kg=Decimal("0.500"),
+    )
+    code = f"SERVICE-PICKUP-{uuid4().hex[:12].upper()}"
+    service = PickupService(db_session)
+
+    pickup = service.create_pickup(
+        CreatePickupCommand(
+            code=f"  {code}  ",
+            hub_id=hub.id,
+            driver_id=driver.id,
+        )
+    )
+    service.assign_batch(
+        AssignBatchCommand(
+            pickup_id=pickup.id,
+            batch_id=batch.id,
+        )
+    )
+    service.complete_pickup(pickup.id)
+
+    db_session.expire_all()
+
+    stored_pickup = PickupRepository(db_session).get_by_id(
+        pickup.id
+    )
+    stored_batch = MaterialBatchRepository(db_session).get_by_id(
+        batch.id
+    )
+    stored_hub = HubRepository(db_session).get_by_id(hub.id)
+
+    assert stored_pickup is not None
+    assert stored_pickup.code == code
+    assert stored_pickup.status == PickupStatus.COMPLETED
+    assert stored_pickup.total_batches == 1
+    assert stored_pickup.total_bottles == 20
+    assert stored_batch is not None
+    assert stored_batch.status == MaterialBatchStatus.PICKED_UP
+    assert stored_batch.pickup_id == pickup.id
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.status == HubStatus.ACTIVE

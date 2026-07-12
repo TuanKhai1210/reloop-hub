@@ -5,6 +5,8 @@ class UserRole(StrEnum):
     USER = "USER"
     ADMIN = "ADMIN"
     DRIVER = "DRIVER"
+    OPERATOR = "OPERATOR"
+    RECYCLER = "RECYCLER"
 
 
 class MaterialType(StrEnum):
@@ -92,3 +94,18 @@ class VerificationResult(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
     REVIEW = "REVIEW"
+
+
+class RouteStatus(StrEnum):
+    PLANNED = "PLANNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TraceStage(StrEnum):
+    DEPOSITED = "DEPOSITED"
+    HUB_STORED = "HUB_STORED"
+    PICKED_UP = "PICKED_UP"
+    RECEIVED = "RECEIVED"
+    REJECTED = "REJECTED"

@@ -12,6 +12,8 @@ ModelT = TypeVar("ModelT", bound=Base)
 
 
 class BaseRepository(Generic[ModelT]):
+    MAX_PAGE_SIZE = 1000
+
     def __init__(
         self,
         session: Session,
@@ -47,14 +49,15 @@ class BaseRepository(Generic[ModelT]):
         offset: int = 0,
         limit: int = 100,
     ) -> Sequence[ModelT]:
-        if offset < 0:
-            raise ValueError("offset must be non-negative")
+        self._validate_pagination(offset, limit)
 
-        if limit <= 0:
-            raise ValueError("limit must be positive")
+        primary_key = next(
+            iter(self.model.__table__.primary_key.columns)
+        )
 
         statement = (
             select(self.model)
+            .order_by(primary_key)
             .offset(offset)
             .limit(limit)
         )
@@ -71,3 +74,20 @@ class BaseRepository(Generic[ModelT]):
     def delete(self, entity: ModelT) -> None:
         self.session.delete(entity)
         self.session.flush()
+
+    @classmethod
+    def _validate_pagination(
+        cls,
+        offset: int,
+        limit: int,
+    ) -> None:
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+
+        if limit > cls.MAX_PAGE_SIZE:
+            raise ValueError(
+                f"limit must not exceed {cls.MAX_PAGE_SIZE}"
+            )
