@@ -30,6 +30,7 @@ from app.repositories import (
 )
 from app.services import (
     AcceptBottleCommand,
+    ConflictError,
     InvalidStateError,
     ReturnService,
 )
@@ -655,3 +656,235 @@ def test_accept_bottle_rejects_full_compartment_without_changes(
     assert stored_batch.estimated_weight_kg == Decimal("0.000")
 
     assert stored_transactions == []
+
+
+@pytest.mark.parametrize(
+    "command_overrides,expected_message",
+    [
+        (
+            {
+                "transaction_code": "   ",
+            },
+            "transaction code must not be empty",
+        ),
+        (
+            {
+                "points_awarded": -1,
+            },
+            "awarded points must be non-negative",
+        ),
+        (
+            {
+                "verifier_name": "   ",
+            },
+            "verifier name must not be empty",
+        ),
+    ],
+)
+def test_accept_bottle_rejects_invalid_metadata_without_changes(
+    db_session: Session,
+    command_overrides: dict[str, object],
+    expected_message: str,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    batch = create_batch(db_session, hub)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    command_data = {
+        "session_id": return_session.id,
+        "batch_id": batch.id,
+        "transaction_code": (
+            f"INVALID-METADATA-TX-{uuid4().hex.upper()}"
+        ),
+        "material_type": MaterialType.PET,
+        "verified_material_type": MaterialType.PET,
+        "verification_level": VerificationLevel.LEVEL_2,
+        "cleanliness_status": CleanlinessStatus.CLEAN,
+        "weight_gram": Decimal("25.00"),
+        "points_awarded": 10,
+        "verifier_name": "sensor_rule_engine",
+    }
+
+    command_data.update(command_overrides)
+
+    command = AcceptBottleCommand(**command_data)
+
+    with pytest.raises(
+        InvalidStateError,
+        match=expected_message,
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert stored_batch.estimated_weight_kg == Decimal("0.000")
+
+    assert stored_transactions == []
+
+
+def test_accept_bottle_rejects_duplicate_transaction_code(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    batch = create_batch(db_session, hub)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    transaction_code = (
+        f"DUPLICATE-TX-{uuid4().hex.upper()}"
+    )
+
+    first_command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=batch.id,
+        transaction_code=transaction_code,
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    service = ReturnService(db_session)
+
+    first_transaction = service.accept_bottle(
+        first_command
+    )
+
+    first_transaction_id = first_transaction.id
+
+    duplicate_command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=batch.id,
+        transaction_code=transaction_code,
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("30.00"),
+        points_awarded=99,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        ConflictError,
+        match="transaction code already exists",
+    ):
+        service.accept_bottle(duplicate_command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    stored_verification = VerificationEventRepository(
+        db_session
+    ).get_latest_by_transaction(
+        first_transaction_id
+    )
+
+    stored_ledger = PointLedgerRepository(
+        db_session
+    ).get_by_source(
+        PointSourceType.BOTTLE_RETURN,
+        first_transaction_id,
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 10
+    assert stored_user.total_bottles_returned == 1
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 1
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.total_accepted == 1
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 10
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 1
+    assert stored_batch.estimated_weight_kg == Decimal("0.025")
+
+    assert len(stored_transactions) == 1
+    assert stored_transactions[0].id == first_transaction_id
+    assert stored_transactions[0].points_awarded == 10
+    assert stored_transactions[0].weight_gram == Decimal("25.00")
+
+    assert stored_verification is not None
+    assert stored_verification.result == VerificationResult.PASS
+
+    assert stored_ledger is not None
+    assert stored_ledger.points_change == 10
+    assert stored_ledger.balance_after == 10
