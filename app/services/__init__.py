@@ -9,6 +9,7 @@ from app.services.errors import (
     ServiceError,
 )
 from app.services.voucher_commands import RedeemVoucherCommand
+from app.services.voucher_service import VoucherService
 from app.services.return_service import ReturnService
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "EntityNotFoundError",
     "InvalidStateError",
     "ReturnService",
+    "VoucherService",
     "ServiceError",
 ]
