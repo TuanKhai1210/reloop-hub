@@ -193,6 +193,50 @@ class ReturnService:
 
         return return_session
 
+    def cancel_session(
+        self,
+        *,
+        session_id: UUID,
+    ) -> ReturnSession:
+        if self.session.in_transaction():
+            return self._cancel_session(
+                session_id=session_id
+            )
+
+        with self.session.begin():
+            return self._cancel_session(
+                session_id=session_id
+            )
+
+    def _cancel_session(
+        self,
+        *,
+        session_id: UUID,
+    ) -> ReturnSession:
+        return_session = (
+            self.return_session_repository
+            .get_by_id_for_update(session_id)
+        )
+
+        if return_session is None:
+            raise EntityNotFoundError(
+                "return session not found"
+            )
+
+        if return_session.status != ReturnSessionStatus.OPEN:
+            raise InvalidStateError(
+                "return session is not open"
+            )
+
+        return_session.status = (
+            ReturnSessionStatus.CANCELLED
+        )
+        return_session.finished_at = datetime.now(UTC)
+
+        self.session.flush()
+
+        return return_session
+
     def accept_bottle(
         self,
         command: AcceptBottleCommand,
