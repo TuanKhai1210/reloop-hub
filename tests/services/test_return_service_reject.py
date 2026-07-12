@@ -28,6 +28,7 @@ from app.repositories import (
 )
 from app.services import (
     ConflictError,
+    EntityNotFoundError,
     InvalidStateError,
     RejectBottleCommand,
     ReturnService,
@@ -501,4 +502,35 @@ def test_reject_bottle_rejects_duplicate_transaction_code(
     )
 
     assert stored_ledger is None
+
+
+def test_reject_bottle_rejects_unknown_session_without_changes(
+    db_session: Session,
+) -> None:
+    transaction_code = (
+        f"UNKNOWN-REJECT-SESSION-{uuid4().hex.upper()}"
+    )
+
+    command = RejectBottleCommand(
+        session_id=uuid4(),
+        transaction_code=transaction_code,
+        material_type=MaterialType.UNKNOWN,
+        reject_reason=RejectReason.UNSUPPORTED_MATERIAL,
+        verification_level=VerificationLevel.LEVEL_2,
+        verifier_name="sensor_rule_engine",
+        verified_material_type=MaterialType.UNKNOWN,
+        cleanliness_status=CleanlinessStatus.UNKNOWN,
+    )
+
+    with pytest.raises(
+        EntityNotFoundError,
+        match="return session not found",
+    ):
+        ReturnService(db_session).reject_bottle(command)
+
+    stored_transaction = BottleTransactionRepository(
+        db_session
+    ).get_by_code(transaction_code)
+
+    assert stored_transaction is None
 

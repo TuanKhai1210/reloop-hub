@@ -31,6 +31,7 @@ from app.repositories import (
 from app.services import (
     AcceptBottleCommand,
     ConflictError,
+    EntityNotFoundError,
     InvalidStateError,
     ReturnService,
 )
@@ -888,3 +889,140 @@ def test_accept_bottle_rejects_duplicate_transaction_code(
     assert stored_ledger is not None
     assert stored_ledger.points_change == 10
     assert stored_ledger.balance_after == 10
+
+
+def test_accept_bottle_rejects_unknown_session_without_changes(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    batch = create_batch(db_session, hub)
+
+    transaction_code = (
+        f"UNKNOWN-SESSION-TX-{uuid4().hex.upper()}"
+    )
+
+    command = AcceptBottleCommand(
+        session_id=uuid4(),
+        batch_id=batch.id,
+        transaction_code=transaction_code,
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        EntityNotFoundError,
+        match="return session not found",
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transaction = BottleTransactionRepository(
+        db_session
+    ).get_by_code(transaction_code)
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert (
+        stored_batch.estimated_weight_kg
+        == Decimal("0.000")
+    )
+
+    assert stored_transaction is None
+
+
+def test_accept_bottle_rejects_unknown_batch_without_changes(
+    db_session: Session,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    transaction_code = (
+        f"UNKNOWN-BATCH-TX-{uuid4().hex.upper()}"
+    )
+
+    command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=uuid4(),
+        transaction_code=transaction_code,
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        EntityNotFoundError,
+        match="material batch not found",
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_transaction = BottleTransactionRepository(
+        db_session
+    ).get_by_code(transaction_code)
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_transaction is None
