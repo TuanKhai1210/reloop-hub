@@ -313,3 +313,104 @@ def test_accept_bottle_rejects_closed_session_without_changes(
     assert stored_batch.estimated_weight_kg == Decimal("0.000")
 
     assert stored_transactions == []
+
+
+@pytest.mark.parametrize(
+    "invalid_batch_case,expected_message",
+    [
+        (
+            "different_hub",
+            "material batch belongs to another hub",
+        ),
+        (
+            "not_storing",
+            "material batch is not storing bottles",
+        ),
+    ],
+)
+def test_accept_bottle_rejects_invalid_batch_without_changes(
+    db_session: Session,
+    invalid_batch_case: str,
+    expected_message: str,
+) -> None:
+    user = create_user(db_session)
+    session_hub = create_hub(db_session)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=session_hub.id,
+    )
+
+    if invalid_batch_case == "different_hub":
+        batch_hub = create_hub(db_session)
+        batch = create_batch(db_session, batch_hub)
+    else:
+        batch = create_batch(db_session, session_hub)
+        batch.status = MaterialBatchStatus.READY_FOR_PICKUP
+        db_session.flush()
+
+    command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=batch.id,
+        transaction_code=(
+            f"INVALID-BATCH-TX-{uuid4().hex.upper()}"
+        ),
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=VerificationLevel.LEVEL_2,
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        InvalidStateError,
+        match=expected_message,
+    ):
+        ReturnService(db_session).accept_bottle(command)
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_session_hub = HubRepository(
+        db_session
+    ).get_by_id(session_hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_session_hub is not None
+    assert stored_session_hub.pet_current == 0
+    assert stored_session_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == ReturnSessionStatus.OPEN
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert stored_batch.estimated_weight_kg == Decimal("0.000")
+
+    assert stored_transactions == []
