@@ -199,3 +199,36 @@ def test_database_has_no_schema_drift(
         )
 
     assert schema_changes == []
+
+
+def test_return_sessions_has_unique_open_user_index(
+    database_engine: Engine,
+) -> None:
+    database_inspector = inspect(database_engine)
+    indexes = database_inspector.get_indexes(
+        "return_sessions",
+        schema="public",
+    )
+
+    target_index = next(
+        (
+            index
+            for index in indexes
+            if index["name"]
+            == "uq_return_sessions_user_open"
+        ),
+        None,
+    )
+
+    assert target_index is not None
+    assert target_index["unique"] is True
+    assert target_index["column_names"] == ["user_id"]
+
+    predicate = str(
+        target_index["dialect_options"][
+            "postgresql_where"
+        ]
+    )
+
+    assert "status" in predicate
+    assert "OPEN" in predicate

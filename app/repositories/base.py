@@ -1,4 +1,4 @@
-﻿from collections.abc import Sequence
+from collections.abc import Sequence
 from typing import Generic, TypeVar
 from uuid import UUID
 
@@ -22,6 +22,24 @@ class BaseRepository(Generic[ModelT]):
 
     def get_by_id(self, record_id: UUID) -> ModelT | None:
         return self.session.get(self.model, record_id)
+
+    def get_by_id_for_update(
+        self,
+        record_id: UUID,
+    ) -> ModelT | None:
+        primary_key = next(
+            iter(self.model.__table__.primary_key.columns)
+        )
+
+        statement = (
+            select(self.model)
+            .where(primary_key == record_id)
+            .with_for_update()
+        )
+
+        return self.session.scalars(
+            statement
+        ).one_or_none()
 
     def list_all(
         self,
