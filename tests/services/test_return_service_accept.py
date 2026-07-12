@@ -28,7 +28,11 @@ from app.repositories import (
     UserRepository,
     VerificationEventRepository,
 )
-from app.services import AcceptBottleCommand, ReturnService
+from app.services import (
+    AcceptBottleCommand,
+    InvalidStateError,
+    ReturnService,
+)
 
 
 pytestmark = pytest.mark.integration
@@ -215,3 +219,97 @@ def test_accept_bottle_updates_all_return_records(
     assert stored_ledger.user_id == user.id
     assert stored_ledger.points_change == 10
     assert stored_ledger.balance_after == 10
+
+
+@pytest.mark.parametrize(
+    "closed_status",
+    [
+        ReturnSessionStatus.COMPLETED,
+        ReturnSessionStatus.CANCELLED,
+    ],
+)
+def test_accept_bottle_rejects_closed_session_without_changes(
+    db_session: Session,
+    closed_status: ReturnSessionStatus,
+) -> None:
+    user = create_user(db_session)
+    hub = create_hub(db_session)
+    batch = create_batch(db_session, hub)
+
+    return_session = ReturnService(
+        db_session
+    ).start_session(
+        user_id=user.id,
+        hub_id=hub.id,
+    )
+
+    return_session.status = closed_status
+    db_session.flush()
+
+    command = AcceptBottleCommand(
+        session_id=return_session.id,
+        batch_id=batch.id,
+        transaction_code=(
+            f"CLOSED-TX-{uuid4().hex.upper()}"
+        ),
+        material_type=MaterialType.PET,
+        verified_material_type=MaterialType.PET,
+        verification_level=(
+            VerificationLevel.LEVEL_2
+        ),
+        cleanliness_status=CleanlinessStatus.CLEAN,
+        weight_gram=Decimal("25.00"),
+        points_awarded=10,
+        verifier_name="sensor_rule_engine",
+    )
+
+    with pytest.raises(
+        InvalidStateError,
+        match="return session is not open",
+    ):
+        ReturnService(db_session).accept_bottle(
+            command
+        )
+
+    db_session.expire_all()
+
+    stored_user = UserRepository(
+        db_session
+    ).get_by_id(user.id)
+
+    stored_hub = HubRepository(
+        db_session
+    ).get_by_id(hub.id)
+
+    stored_session = ReturnSessionRepository(
+        db_session
+    ).get_by_id(return_session.id)
+
+    stored_batch = MaterialBatchRepository(
+        db_session
+    ).get_by_id(batch.id)
+
+    stored_transactions = (
+        BottleTransactionRepository(db_session)
+        .list_by_session(return_session.id)
+    )
+
+    assert stored_user is not None
+    assert stored_user.points_balance == 0
+    assert stored_user.total_bottles_returned == 0
+
+    assert stored_hub is not None
+    assert stored_hub.pet_current == 0
+    assert stored_hub.hdpe_current == 0
+
+    assert stored_session is not None
+    assert stored_session.status == closed_status
+    assert stored_session.total_accepted == 0
+    assert stored_session.total_rejected == 0
+    assert stored_session.total_points == 0
+
+    assert stored_batch is not None
+    assert stored_batch.bottle_count == 0
+    assert stored_batch.estimated_weight_kg == Decimal("0.000")
+
+    assert stored_transactions == []
