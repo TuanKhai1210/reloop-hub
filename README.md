@@ -34,8 +34,9 @@ calls `Base.metadata.create_all()` at startup and does not use SQLite.
 - Green Points ledger and voucher redemption
 - material batch and pickup lifecycle
 - collection vehicle routing and route stops
-- bottle-level traceability
-- dashboard and ESG reporting
+- bottle-level traceability through recycler receipt
+- calendar day/week/month dashboard and ESG reporting
+- feedstock-quality, participation, logistics and CO2 KPIs
 - WebSocket Hub updates
 - PostgreSQL concurrency and rollback tests
 
@@ -45,9 +46,19 @@ calls `Base.metadata.create_all()` at startup and does not use SQLite.
 python -m pip install -r requirements-dev.txt
 python -m alembic upgrade head
 python -m scripts.seed_database
-python -m pytest -q -p no:cacheprovider
 python -m uvicorn app.main:app --reload
 ```
+
+Tests require an isolated database whose name ends in `_test`. Copy
+`.env.test.example` to `.env.test`, point it to that database, migrate that
+database and run tests with:
+
+```powershell
+python -m scripts.prepare_test_database
+python -m pytest -q -p no:cacheprovider
+```
+
+See `docs/database.md` for database creation details.
 
 Open the API documentation at:
 

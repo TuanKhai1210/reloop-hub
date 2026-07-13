@@ -187,7 +187,10 @@ def test_complete_unified_api_flow(db_session: Session) -> None:
             assert accepted.status_code == 201, accepted.text
             assert accepted.json()["machine_action"] == "accept_and_store"
             assert accepted.json()["deposit"]["points_awarded"] == 10
+            assert accepted.json()["deposit"]["cleanliness_score"] == "0.9100"
             trace_code = accepted.json()["deposit"]["code"]
+            batch_id = accepted.json()["deposit"]["batch_id"]
+            session_id = accepted.json()["deposit"]["session_id"]
 
             rejected = client.post(
                 "/api/v1/deposits/inspect",
@@ -206,6 +209,20 @@ def test_complete_unified_api_flow(db_session: Session) -> None:
             assert rejected.status_code == 201, rejected.text
             assert rejected.json()["machine_action"] == "reject_and_return"
 
+            completed_session = client.post(
+                f"/api/v1/deposits/sessions/{session_id}/complete",
+                headers=user_headers,
+            )
+            assert completed_session.status_code == 200
+            assert completed_session.json()["status"] == "COMPLETED"
+
+            telemetry_history = client.get(
+                f"/api/v1/hubs/{data['hub'].code}/telemetry?period=day",
+                headers=admin_headers,
+            )
+            assert telemetry_history.status_code == 200
+            assert len(telemetry_history.json()) == 1
+
             vouchers = client.get(
                 "/api/v1/vouchers", headers=user_headers
             )
@@ -216,6 +233,19 @@ def test_complete_unified_api_flow(db_session: Session) -> None:
                 json={"voucher_id": str(data["voucher"].id)},
             )
             assert redemption.status_code == 201, redemption.text
+            used_redemption = client.post(
+                "/api/v1/vouchers/redemptions/"
+                f"{redemption.json()['redemption_code']}/use",
+                headers=admin_headers,
+            )
+            assert used_redemption.status_code == 200
+            assert used_redemption.json()["status"] == "USED"
+            reused_redemption = client.post(
+                "/api/v1/vouchers/redemptions/"
+                f"{redemption.json()['redemption_code']}/use",
+                headers=admin_headers,
+            )
+            assert reused_redemption.status_code == 409
 
             optimized = client.post(
                 "/api/v1/routes/optimize",
@@ -248,28 +278,68 @@ def test_complete_unified_api_flow(db_session: Session) -> None:
             assert completed.status_code == 200, completed.text
             assert completed.json()["status"] == "COMPLETED"
 
+            receipt = client.post(
+                f"/api/v1/traceability/batches/{batch_id}/receive",
+                headers=admin_headers,
+                json={
+                    "facility_code": "RECYCLER-DEMO-01",
+                    "received_weight_kg": "0.025",
+                    "notes": "API integration receipt",
+                },
+            )
+            assert receipt.status_code == 200, receipt.text
+            assert receipt.json()["status"] == "RECEIVED"
+            assert receipt.json()["trace_events_created"] == 1
+            duplicate_receipt = client.post(
+                f"/api/v1/traceability/batches/{batch_id}/receive",
+                headers=admin_headers,
+                json={
+                    "facility_code": "RECYCLER-DEMO-01",
+                    "received_weight_kg": "0.025",
+                },
+            )
+            assert duplicate_receipt.status_code == 409
+
             trace = client.get(
                 f"/api/v1/traceability/{trace_code}",
                 headers=admin_headers,
             )
             assert trace.status_code == 200, trace.text
-            assert trace.json()["current_stage"] == "PICKED_UP"
+            assert trace.json()["current_stage"] == "RECEIVED"
 
             summary = client.get(
-                "/api/v1/dashboard/summary",
+                "/api/v1/dashboard/summary?period=week",
                 headers=admin_headers,
             )
             assert summary.status_code == 200, summary.text
+            assert summary.json()["period"] == "week"
+            assert summary.json()["participants"] == 1
+            assert summary.json()["successful_transactions"] == 1
             assert summary.json()["accepted_bottles"] == 1
             assert summary.json()["rejected_bottles"] == 1
+            assert summary.json()["success_rate_percent"] == "50.00"
+            assert summary.json()["distance_saved_km"] != "0.00"
+            assert (
+                summary.json()["traceability_completeness_percent"]
+                == "100.00"
+            )
+
+            denied_summary = client.get(
+                "/api/v1/dashboard/summary",
+                headers=user_headers,
+            )
+            assert denied_summary.status_code == 403
 
             report = client.get(
-                "/api/v1/reports/esg?period=day",
+                "/api/v1/reports/esg?period=month",
                 headers=admin_headers,
             )
             assert report.status_code == 200, report.text
+            assert report.json()["period"] == "month"
             assert report.json()["pet_bottles"] == 1
             assert report.json()["completed_routes"] == 1
+            assert report.json()["participants"] == 1
+            assert report.json()["co2_methodology_version"]
     finally:
         app.dependency_overrides.clear()
 

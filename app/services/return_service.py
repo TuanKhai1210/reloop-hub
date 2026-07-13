@@ -557,6 +557,7 @@ class ReturnService:
                     ),
                     weight_gram=command.weight_gram,
                     ai_confidence=command.confidence,
+                    cleanliness_score=command.cleanliness_score,
                     points_awarded=(
                         points_awarded
                     ),
@@ -688,6 +689,7 @@ class ReturnService:
                     ),
                     weight_gram=command.weight_gram,
                     ai_confidence=command.confidence,
+                    cleanliness_score=command.cleanliness_score,
                     points_awarded=0,
                 )
             )

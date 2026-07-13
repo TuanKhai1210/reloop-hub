@@ -23,10 +23,11 @@ from app.routers import (
 
 app = FastAPI(
     title=settings.app_name,
-    version="2.0.0",
+    version="2.1.0",
     description=(
         "Unified ReLoop Hub backend for verified PET/HDPE returns, "
-        "Green Points, collection routing, traceability and ESG reporting."
+        "Green Points, collection routing, recycler receipt, realtime "
+        "operations, and calendar-based Dashboard/ESG reporting."
     ),
 )
 app.add_middleware(

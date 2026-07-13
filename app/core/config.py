@@ -1,5 +1,7 @@
 ﻿from functools import lru_cache
 
+from decimal import Decimal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
 
@@ -17,6 +19,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
     device_api_key: str = "development-device-key"
+    reporting_timezone: str = "Asia/Ho_Chi_Minh"
+    co2_emission_factor_kg_per_km: Decimal = Decimal("0.27")
+    co2_methodology_version: str = "route-distance-v1"
+    co2_factor_source: str = (
+        "prototype assumption; validate before ESG use"
+    )
     cors_origins: str = (
         "http://localhost:3000,http://localhost:5173"
     )

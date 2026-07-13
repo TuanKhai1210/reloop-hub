@@ -35,6 +35,11 @@ class BottleTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="ck_bottle_transactions_ai_confidence_valid",
         ),
         CheckConstraint(
+            "cleanliness_score IS NULL OR "
+            "(cleanliness_score >= 0 AND cleanliness_score <= 1)",
+            name="ck_bottle_transactions_cleanliness_score_valid",
+        ),
+        CheckConstraint(
             "(status = 'ACCEPTED' AND batch_id IS NOT NULL "
             "AND reject_reason IS NULL) OR "
             "(status = 'REJECTED' AND batch_id IS NULL "
@@ -131,6 +136,11 @@ class BottleTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     ai_confidence: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+    )
+
+    cleanliness_score: Mapped[Decimal | None] = mapped_column(
         Numeric(5, 4),
         nullable=True,
     )

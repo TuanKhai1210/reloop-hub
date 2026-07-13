@@ -31,6 +31,7 @@ class AcceptBottleCommand:
     output_payload: Mapping[str, object] | None = None
     confidence: Decimal | None = None
     processing_time_ms: int | None = None
+    cleanliness_score: Decimal | None = None
 
 
 
@@ -54,3 +55,4 @@ class RejectBottleCommand:
     confidence: Decimal | None = None
     processing_time_ms: int | None = None
     failure_reason: str | None = None
+    cleanliness_score: Decimal | None = None

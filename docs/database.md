@@ -76,12 +76,23 @@ Create the PostgreSQL test database with `reloop_app` as its owner:
 
 Apply Alembic migrations to `reloop_hub_test` before running tests.
 
+```powershell
+python -m scripts.prepare_test_database
+python -m pytest -q -p no:cacheprovider
+```
+
+The preparation command reads `TEST_DATABASE_URL` from `.env.test`, refuses
+database names that do not end in `_test`, and upgrades only that isolated
+database. Do not copy `TEST_DATABASE_URL` into `.env`.
+
 The test suite exits without running tests when:
 
 - `APP_ENV` is not `test`
 - `TEST_DATABASE_URL` is missing
 - the configured database name does not end with `_test`
 - the connected database does not match `TEST_DATABASE_URL`
+- required application tables are missing
+- the test database Alembic revision does not match the repository head
 
 Do not commit `.env.test`.
 
@@ -118,10 +129,10 @@ Check the current revision:
 python -m alembic current
 ```
 
-Current initial revision:
+Current revision:
 
 ```text
-7ef98cb4e30a (head)
+d81f4a6b2c09 (head)
 ```
 
 Check for differences between the models and the database:
@@ -178,6 +189,11 @@ The seed script creates:
 - `voucher_redemptions`
 - `pickups`
 - `verification_events`
+- `sensor_readings`
+- `vehicles`
+- `collection_routes`
+- `route_stops`
+- `trace_events`
 
 Alembic also creates the `alembic_version` table.
 

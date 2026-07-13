@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -64,6 +65,38 @@ class VoucherService:
                     command
                 )
             )
+
+    def use_redemption(self, redemption_code: str) -> VoucherRedemption:
+        if self.session.in_transaction():
+            return self._use_redemption(redemption_code)
+        with self.session.begin():
+            return self._use_redemption(redemption_code)
+
+    def _use_redemption(self, redemption_code: str) -> VoucherRedemption:
+        normalized_code = redemption_code.strip()
+        if not normalized_code:
+            raise InvalidStateError("redemption code must not be empty")
+        redemption = self.session.scalar(
+            select(VoucherRedemption)
+            .where(
+                VoucherRedemption.redemption_code == normalized_code
+            )
+            .with_for_update()
+        )
+        if redemption is None:
+            raise EntityNotFoundError("voucher redemption not found")
+        if redemption.status != VoucherRedemptionStatus.ISSUED:
+            raise InvalidStateError("voucher redemption is not usable")
+        now = datetime.now(UTC)
+        if (
+            redemption.expires_at is not None
+            and redemption.expires_at <= now
+        ):
+            raise InvalidStateError("voucher redemption has expired")
+        redemption.status = VoucherRedemptionStatus.USED
+        redemption.used_at = now
+        self.session.flush()
+        return redemption
 
     def _redeem_voucher_with_conflict_mapping(
         self,

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.api_errors import service_http_error
 from app.core.database import get_db
-from app.dependencies import get_current_user
-from app.models import User
+from app.dependencies import get_current_user, require_roles
+from app.models import User, UserRole
 from app.repositories import VoucherRepository
 from app.schemas import (
     VoucherRead,
@@ -50,6 +50,25 @@ def redeem_voucher(
                     f"REDEEM-{uuid4().hex[:16].upper()}"
                 ),
             )
+        )
+    except ServiceError as error:
+        raise service_http_error(error) from error
+
+
+@router.post(
+    "/redemptions/{redemption_code}/use",
+    response_model=VoucherRedemptionRead,
+)
+def use_voucher_redemption(
+    redemption_code: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(
+        require_roles(UserRole.ADMIN, UserRole.OPERATOR)
+    ),
+) -> VoucherRedemptionRead:
+    try:
+        return VoucherRedemptionRead.model_validate(
+            VoucherService(db).use_redemption(redemption_code)
         )
     except ServiceError as error:
         raise service_http_error(error) from error
