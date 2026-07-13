@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -5,13 +7,52 @@ from sqlalchemy.orm import Session
 from app.api_errors import service_http_error
 from app.core.database import get_db
 from app.dependencies import get_current_user, verify_device_key
-from app.models import BottleTransaction, BottleTransactionStatus, User
+from app.models import (
+    BottleTransaction,
+    BottleTransactionStatus,
+    ReturnSession,
+    User,
+    UserRole,
+)
 from app.realtime import hub_manager
-from app.schemas import DepositInspection, DepositRead, DepositResult
-from app.services import DepositService, InspectBottleCommand, ServiceError
+from app.schemas import (
+    DepositInspection,
+    DepositRead,
+    DepositResult,
+    ReturnSessionRead,
+)
+from app.services import (
+    DepositService,
+    InspectBottleCommand,
+    ReturnService,
+    ServiceError,
+)
 
 
 router = APIRouter(prefix="/deposits", tags=["Bottle returns"])
+
+
+def authorize_session(
+    *,
+    session_id: UUID,
+    db: Session,
+    user: User,
+) -> ReturnSession:
+    return_session = db.get(ReturnSession, session_id)
+    if return_session is None:
+        raise HTTPException(status_code=404, detail="Return session not found")
+    if (
+        user.role == UserRole.USER
+        and return_session.user_id != user.id
+    ):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if user.role not in {
+        UserRole.USER,
+        UserRole.ADMIN,
+        UserRole.OPERATOR,
+    }:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return return_session
 
 
 @router.post("/inspect", response_model=DepositResult, status_code=201)
@@ -62,6 +103,38 @@ async def inspect_deposit(
             else f"Bottle rejected: {transaction.reject_reason.value}"
         ),
     )
+
+
+@router.post(
+    "/sessions/{session_id}/complete",
+    response_model=ReturnSessionRead,
+)
+def complete_return_session(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReturnSession:
+    authorize_session(session_id=session_id, db=db, user=user)
+    try:
+        return ReturnService(db).complete_session(session_id=session_id)
+    except ServiceError as error:
+        raise service_http_error(error) from error
+
+
+@router.post(
+    "/sessions/{session_id}/cancel",
+    response_model=ReturnSessionRead,
+)
+def cancel_return_session(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReturnSession:
+    authorize_session(session_id=session_id, db=db, user=user)
+    try:
+        return ReturnService(db).cancel_session(session_id=session_id)
+    except ServiceError as error:
+        raise service_http_error(error) from error
 
 
 @router.get("", response_model=list[DepositRead])

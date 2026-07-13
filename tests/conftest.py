@@ -1,6 +1,8 @@
 ﻿from collections.abc import Generator
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine, inspect, text
@@ -8,19 +10,11 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import app.models
+from app.models.base import Base
 
-REQUIRED_TABLES = {
-    "users",
-    "hubs",
-    "return_sessions",
-    "material_batches",
-    "bottle_transactions",
-    "point_ledger",
-    "vouchers",
-    "voucher_redemptions",
-    "pickups",
-    "verification_events",
-}
+
+REQUIRED_TABLES = set(Base.metadata.tables)
 
 
 class TestDatabaseSettings(BaseSettings):
@@ -134,6 +128,29 @@ def verify_database_schema(
             f"Missing tables: {missing_names}. "
             "Run Alembic migrations against "
             "reloop_hub_test."
+        )
+
+    if "alembic_version" not in existing_tables:
+        pytest.fail(
+            "Test database has no Alembic revision. Run Alembic "
+            "migrations against the configured *_test database."
+        )
+
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    expected_heads = set(script.get_heads())
+    with database_engine.connect() as connection:
+        actual_heads = set(
+            connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalars()
+        )
+    if actual_heads != expected_heads:
+        pytest.fail(
+            "Test database schema revision is stale. "
+            f"Expected Alembic head(s) {sorted(expected_heads)}, "
+            f"found {sorted(actual_heads)}. Run `python -m alembic "
+            "upgrade head` with DATABASE_URL pointing to the isolated "
+            "*_test database before running pytest."
         )
 
 

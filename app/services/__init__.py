@@ -26,6 +26,10 @@ from app.services.deposit_service import (
 )
 from app.services.route_service import RouteService
 from app.services.reporting_service import ReportingService
+from app.services.traceability_service import (
+    BatchReceiptResult,
+    TraceabilityService,
+)
 
 __all__ = [
     "AcceptBottleCommand",
@@ -45,5 +49,7 @@ __all__ = [
     "InspectBottleCommand",
     "RouteService",
     "ReportingService",
+    "BatchReceiptResult",
+    "TraceabilityService",
     "ServiceError",
 ]

@@ -1,13 +1,16 @@
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import (
     BottleTransactionStatus,
     HubStatus,
+    MaterialBatchStatus,
     MaterialType,
+    ReturnSessionStatus,
     RouteStatus,
     TraceStage,
     UserRole,
@@ -92,7 +95,20 @@ class DepositRead(ORMModel):
     status: BottleTransactionStatus
     points_awarded: int
     weight_gram: Decimal | None
+    ai_confidence: Decimal | None
+    cleanliness_score: Decimal | None
     created_at: datetime
+
+
+class ReturnSessionRead(ORMModel):
+    id: UUID
+    user_id: UUID
+    hub_id: UUID
+    status: ReturnSessionStatus
+    total_accepted: int
+    total_rejected: int
+    total_points: int
+    finished_at: datetime | None
 
 
 class DepositResult(BaseModel):
@@ -160,6 +176,17 @@ class PickupStopRequest(BaseModel):
     collected_load_kg: Decimal = Field(ge=0)
 
 
+class SensorReadingRead(ORMModel):
+    id: UUID
+    hub_id: UUID
+    fill_level: Decimal
+    weight_kg: Decimal
+    camera_online: bool
+    sensor_online: bool
+    temperature_c: Decimal | None
+    recorded_at: datetime
+
+
 class TraceEventRead(ORMModel):
     stage: TraceStage
     location_type: str
@@ -175,24 +202,82 @@ class TraceabilityRead(BaseModel):
     events: list[TraceEventRead]
 
 
+class BatchReceiptRequest(BaseModel):
+    facility_code: str = Field(min_length=1, max_length=100)
+    received_weight_kg: Decimal = Field(ge=0)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class BatchReceiptRead(BaseModel):
+    batch_id: UUID
+    batch_code: str
+    status: MaterialBatchStatus
+    facility_code: str
+    received_weight_kg: Decimal
+    bottle_count: int
+    trace_events_created: int
+    received_at: datetime
+
+
 class DashboardSummary(BaseModel):
+    period: Literal["day", "week", "month"]
+    period_start: datetime
+    period_end: datetime
+    reporting_timezone: str
     users: int
+    participants: int
     active_hubs: int
+    near_full_hubs: int
+    offline_hubs: int
+    camera_online_hubs: int
+    sensor_online_hubs: int
     transactions_today: int
+    transactions_in_period: int
+    successful_transactions: int
     accepted_bottles: int
     rejected_bottles: int
+    success_rate_percent: Decimal
+    pet_bottles: int
+    hdpe_bottles: int
     recovered_weight_kg: Decimal
+    average_ai_confidence: Decimal
+    average_cleanliness_score: Decimal
+    rejection_reasons: dict[str, int]
     ready_batches: int
     active_pickups: int
+    completed_routes: int
+    baseline_distance_km: Decimal
+    optimized_distance_km: Decimal
+    distance_saved_km: Decimal
+    distance_saved_percent: Decimal
+    collection_efficiency_kg_per_km: Decimal
+    vehicle_utilization_percent: Decimal
+    estimated_co2_saved_kg: Decimal
+    traceability_completeness_percent: Decimal
 
 
 class ESGReport(BaseModel):
-    period: str
+    period: Literal["day", "week", "month"]
+    period_start: datetime
+    period_end: datetime
+    reporting_timezone: str
+    participants: int
+    total_transactions: int
+    successful_transactions: int
+    success_rate_percent: Decimal
     total_plastic_recovered_kg: Decimal
     pet_bottles: int
     hdpe_bottles: int
     rejected_bottles: int
     completed_routes: int
+    baseline_distance_km: Decimal
+    optimized_distance_km: Decimal
     distance_saved_km: Decimal
+    distance_saved_percent: Decimal
+    collection_efficiency_kg_per_km: Decimal
+    vehicle_utilization_percent: Decimal
     estimated_co2_saved_kg: Decimal
     traceability_completeness_percent: Decimal
+    co2_emission_factor_kg_per_km: Decimal
+    co2_methodology_version: str
+    co2_factor_source: str

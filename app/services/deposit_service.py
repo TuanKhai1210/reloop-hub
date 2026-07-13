@@ -114,6 +114,7 @@ class DepositService:
                     ),
                     weight_gram=command.weight_gram,
                     confidence=command.ai_confidence,
+                    cleanliness_score=command.cleanliness_score,
                     input_payload=self._payload(command),
                     output_payload={"accepted": False},
                     failure_reason=reject_reason.value,
@@ -141,6 +142,7 @@ class DepositService:
                     verifier_name="hub_capacity_rule",
                     weight_gram=command.weight_gram,
                     confidence=command.ai_confidence,
+                    cleanliness_score=command.cleanliness_score,
                     input_payload=self._payload(command),
                     output_payload={"accepted": False},
                 )
@@ -178,6 +180,7 @@ class DepositService:
                     "material_type": command.material_type.value,
                 },
                 confidence=command.ai_confidence,
+                cleanliness_score=command.cleanliness_score,
             )
         )
 

@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,31 @@ from app.services import RouteService, ServiceError
 
 
 router = APIRouter(prefix="/routes", tags=["Collection routes"])
+
+
+def authorize_route_actor(
+    *,
+    route_id: UUID,
+    db: Session,
+    user: User,
+) -> None:
+    if user.role != UserRole.DRIVER:
+        return
+    assigned_driver_id = db.scalar(
+        select(Vehicle.driver_id)
+        .join(
+            CollectionRoute,
+            CollectionRoute.vehicle_id == Vehicle.id,
+        )
+        .where(CollectionRoute.id == route_id)
+    )
+    if assigned_driver_id is None:
+        raise HTTPException(status_code=404, detail="Route not found")
+    if assigned_driver_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Driver is not assigned to this route",
+        )
 
 
 def route_response(
@@ -93,7 +118,7 @@ def list_routes(
 def start_route(
     route_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    user: User = Depends(
         require_roles(
             UserRole.ADMIN,
             UserRole.OPERATOR,
@@ -101,6 +126,7 @@ def start_route(
         )
     ),
 ) -> RouteRead:
+    authorize_route_actor(route_id=route_id, db=db, user=user)
     service = RouteService(db)
     try:
         return route_response(service.start_route(route_id), service)
@@ -122,6 +148,7 @@ def collect_stop(
         )
     ),
 ) -> RouteStopRead:
+    authorize_route_actor(route_id=route_id, db=db, user=user)
     try:
         stop = RouteService(db).collect_stop(
             route_id=route_id,
@@ -138,7 +165,7 @@ def collect_stop(
 def complete_route(
     route_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(
+    user: User = Depends(
         require_roles(
             UserRole.ADMIN,
             UserRole.OPERATOR,
@@ -146,6 +173,7 @@ def complete_route(
         )
     ),
 ) -> RouteRead:
+    authorize_route_actor(route_id=route_id, db=db, user=user)
     service = RouteService(db)
     try:
         return route_response(service.complete_route(route_id), service)

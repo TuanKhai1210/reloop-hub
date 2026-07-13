@@ -9,7 +9,8 @@ from app.core.database import get_db
 from app.dependencies import get_current_user, verify_device_key
 from app.models import Hub, HubStatus, SensorReading, User
 from app.realtime import hub_manager
-from app.schemas import HubRead, HubTelemetry
+from app.schemas import HubRead, HubTelemetry, SensorReadingRead
+from app.services import ReportingService
 
 
 router = APIRouter(prefix="/hubs", tags=["Hubs"])
@@ -34,6 +35,38 @@ def get_hub(
     if hub is None:
         raise HTTPException(status_code=404, detail="Hub not found")
     return hub
+
+
+@router.get(
+    "/{hub_code}/telemetry",
+    response_model=list[SensorReadingRead],
+)
+def telemetry_history(
+    hub_code: str,
+    period: str = Query(default="day", pattern="^(day|week|month)$"),
+    limit: int = Query(default=500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[SensorReading]:
+    hub = db.scalar(select(Hub).where(Hub.code == hub_code))
+    if hub is None:
+        raise HTTPException(status_code=404, detail="Hub not found")
+    try:
+        start, end = ReportingService.period_window(period)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return list(
+        db.scalars(
+            select(SensorReading)
+            .where(
+                SensorReading.hub_id == hub.id,
+                SensorReading.recorded_at >= start,
+                SensorReading.recorded_at < end,
+            )
+            .order_by(SensorReading.recorded_at.desc())
+            .limit(limit)
+        )
+    )
 
 
 @router.post("/{hub_code}/telemetry", response_model=HubRead)
