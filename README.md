@@ -49,6 +49,16 @@ python -m scripts.seed_database
 python -m uvicorn app.main:app --reload
 ```
 
+To populate a large, deterministic dataset covering current day/week/month
+reporting and end-to-end bottle traceability, run:
+
+```powershell
+python -m scripts.seed_demo_dataset --reset
+```
+
+See `docs/demo-dataset.md` for demo accounts, live frontend configuration,
+custom dataset sizes and traceability checks.
+
 Tests require an isolated database whose name ends in `_test`. Copy
 `.env.test.example` to `.env.test`, point it to that database, migrate that
 database and run tests with:
